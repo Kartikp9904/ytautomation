@@ -1,0 +1,17 @@
+.git
+.gitignore
+.env
+*.md
+.pytest_cache
+node_modules
+dist
+venv
+.venv
+__pycache__
+*.pyc
+*.sqlite3
+*.db
+backend/venv
+backend/.pytest_cache
+frontend/node_modules
+frontend/dist

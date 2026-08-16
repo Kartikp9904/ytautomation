@@ -1,0 +1,53 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: yt_automation_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - yt_data:/app/data
+      - yt_storage:/app/storage
+      - yt_temp:/app/temp
+      - yt_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - yt_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: yt_automation_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - yt_network
+
+volumes:
+  yt_data:
+    name: yt_automation_data
+  yt_storage:
+    name: yt_automation_storage
+  yt_temp:
+    name: yt_automation_temp
+  yt_logs:
+    name: yt_automation_logs
+
+networks:
+  yt_network:
+    name: yt_automation_network
+    driver: bridge
