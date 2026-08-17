@@ -32,6 +32,7 @@ async def get_youtube_auth_url(
 
 @router.get("/callback")
 @router.get("/oauth/callback")
+@router.get("/channels/oauth/youtube/callback")
 async def youtube_oauth_callback(
     code: Optional[str] = Query(default=None),
     state: Optional[str] = Query(default=None), # channel_id passed in state
@@ -41,7 +42,7 @@ async def youtube_oauth_callback(
     """
     OAuth2 callback from Google. Exchanges code for tokens and redirects to frontend.
     """
-    frontend_channels_url = "http://localhost:5173/channels"
+    frontend_channels_url = "/channels"
 
     if error:
         return RedirectResponse(

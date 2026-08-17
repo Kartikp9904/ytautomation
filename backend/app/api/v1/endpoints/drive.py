@@ -43,7 +43,7 @@ async def handle_drive_get_callback(
     """
     Browser redirect callback from Google Drive OAuth.
     """
-    frontend_drive_url = "http://localhost:5173/drive"
+    frontend_drive_url = "/drive"
     if error:
         return RedirectResponse(url=f"{frontend_drive_url}?drive_error={error}")
     if not code:

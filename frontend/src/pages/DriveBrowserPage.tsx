@@ -76,6 +76,14 @@ export const DriveBrowserPage: React.FC = () => {
   };
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('connected') === 'true') {
+      setStatusMessage('Google Drive connected successfully!');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (params.get('drive_error')) {
+      setError(`Google Drive Connection Failed: ${params.get('drive_error')}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
     loadStatusAndChannels();
     loadFolders('root');
   }, []);
@@ -97,7 +105,7 @@ export const DriveBrowserPage: React.FC = () => {
   const handleConnectDrive = async () => {
     try {
       const authUrl = await getDriveAuthUrl();
-      window.open(authUrl, '_blank', 'width=600,height=700');
+      window.location.href = authUrl;
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Please configure GOOGLE_CLIENT_ID in Settings or .env first.');
     }

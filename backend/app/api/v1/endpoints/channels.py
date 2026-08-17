@@ -76,3 +76,15 @@ async def delete_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
             detail=f"Channel with ID '{channel_id}' not found"
         )
     return None
+
+
+@router.get("/oauth/youtube/callback")
+@router.get("/oauth/callback")
+async def channels_oauth_callback(
+    code: str = None,
+    state: str = None,
+    error: str = None,
+    db: AsyncSession = Depends(get_db)
+):
+    from app.api.v1.endpoints.youtube import youtube_oauth_callback
+    return await youtube_oauth_callback(code=code, state=state, error=error, db=db)
