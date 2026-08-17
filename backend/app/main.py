@@ -79,7 +79,7 @@ if dist_dir:
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    @app.get("/{full_path:path}")
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     async def serve_spa(full_path: str):
         # Don't intercept API routes
         if full_path.startswith("api/"):
@@ -89,7 +89,7 @@ if dist_dir:
             return FileResponse(target_file)
         return FileResponse(os.path.join(dist_dir, "index.html"))
 else:
-    @app.get("/")
+    @app.api_route("/", methods=["GET", "HEAD"])
     async def root():
         return {
             "message": "YouTube Video Automation & Scheduling Platform API",

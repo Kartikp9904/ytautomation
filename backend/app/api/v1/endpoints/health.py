@@ -11,7 +11,7 @@ from app.schemas.health import SystemHealthResponse, StorageHealth
 router = APIRouter()
 
 
-@router.get("/health", response_model=SystemHealthResponse)
+@router.api_route("/health", methods=["GET", "HEAD"], response_model=SystemHealthResponse)
 async def get_system_health(db: AsyncSession = Depends(get_db)):
     # 1. Database Check
     db_status = "HEALTHY"
