@@ -19,11 +19,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     with op.batch_alter_table('schedules', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('made_for_kids', sa.Boolean(), server_default='0', nullable=False))
-        batch_op.add_column(sa.Column('age_restricted', sa.Boolean(), server_default='0', nullable=False))
+        batch_op.add_column(sa.Column('made_for_kids', sa.Boolean(), server_default=sa.text('false'), nullable=False))
+        batch_op.add_column(sa.Column('age_restricted', sa.Boolean(), server_default=sa.text('false'), nullable=False))
         batch_op.add_column(sa.Column('default_language', sa.String(length=10), nullable=True))
         batch_op.add_column(sa.Column('default_audio_language', sa.String(length=10), nullable=True))
-        batch_op.add_column(sa.Column('contains_synthetic_media', sa.Boolean(), server_default='0', nullable=False))
+        batch_op.add_column(sa.Column('contains_synthetic_media', sa.Boolean(), server_default=sa.text('false'), nullable=False))
         batch_op.add_column(sa.Column('preset_category', sa.String(length=50), nullable=True))
 
 
