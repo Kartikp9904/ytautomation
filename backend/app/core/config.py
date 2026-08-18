@@ -60,9 +60,13 @@ class Settings(BaseSettings):
     def format_async_db_url(cls, v):
         if isinstance(v, str):
             if v.startswith("postgres://"):
-                return v.replace("postgres://", "postgresql+asyncpg://", 1)
+                v = v.replace("postgres://", "postgresql+asyncpg://", 1)
             elif v.startswith("postgresql://") and not v.startswith("postgresql+"):
-                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+                v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+            
+            # asyncpg uses 'ssl' parameter instead of 'sslmode'
+            if "sslmode=" in v:
+                v = v.replace("sslmode=", "ssl=")
         return v
 
     @field_validator("SYNC_DATABASE_URL", mode="before")
@@ -74,11 +78,15 @@ class Settings(BaseSettings):
 
         if isinstance(v, str):
             if v.startswith("postgres://"):
-                return v.replace("postgres://", "postgresql+psycopg2://", 1)
+                v = v.replace("postgres://", "postgresql+psycopg2://", 1)
             elif v.startswith("postgresql://") and not v.startswith("postgresql+"):
-                return v.replace("postgresql://", "postgresql+psycopg2://", 1)
+                v = v.replace("postgresql://", "postgresql+psycopg2://", 1)
             elif v.startswith("postgresql+asyncpg://"):
-                return v.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+                v = v.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+
+            # psycopg2 uses 'sslmode'
+            if "ssl=" in v and "sslmode=" not in v:
+                v = v.replace("ssl=", "sslmode=")
         return v
 
     model_config = SettingsConfigDict(
