@@ -147,3 +147,30 @@ class ContentPresetService:
             idx = (d.day - 1) % len(hooks)
 
         return hooks[idx]
+
+    @classmethod
+    def resolve_description_for_date(
+        cls,
+        preset_id: str,
+        target_date: Optional[datetime] = None,
+        rotation_index: Optional[int] = None
+    ) -> Optional[str]:
+        """
+        Rotates through descriptions:
+        - If preset has a list of 'descriptions', rotates through them day-by-day
+        - Otherwise falls back to preset['description']
+        """
+        preset = cls.get_preset(preset_id)
+        if not preset:
+            return None
+
+        descriptions = preset.get("descriptions")
+        if descriptions and len(descriptions) > 0:
+            if rotation_index is not None:
+                idx = rotation_index % len(descriptions)
+            else:
+                d = target_date or datetime.now()
+                idx = (d.day - 1) % len(descriptions)
+            return descriptions[idx]
+
+        return preset.get("description")

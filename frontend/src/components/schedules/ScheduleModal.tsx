@@ -255,13 +255,14 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const handleApplyPreset = (preset: ContentPreset) => {
     setPresetCategory(preset.id);
     setTitleTemplate('{dynamic_hook}');
-    if (preset.description) setDescriptionTemplate(preset.description);
+    setDescriptionTemplate('{dynamic_description}');
     if (preset.tags && preset.tags.length > 0) setTagsInput(preset.tags.join(', '));
     if (preset.category_id) setCategoryId(preset.category_id);
     if (preset.default_language) setDefaultLanguage(preset.default_language);
     if (preset.default_audio_language) setDefaultAudioLanguage(preset.default_audio_language);
     if (preset.made_for_kids !== undefined) setMadeForKids(preset.made_for_kids);
     if (preset.age_restricted !== undefined) setAgeRestricted(preset.age_restricted);
+    if (preset.contains_synthetic_media !== undefined) setContainsSyntheticMedia(preset.contains_synthetic_media);
   };
 
   return (
@@ -718,15 +719,24 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Description Template Override (Optional)
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Description Template Override (Use {'{dynamic_description}'} for 31-day auto-rotating captions)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => insertVariable('{dynamic_description}', 'description')}
+                    className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 font-mono font-bold cursor-pointer transition"
+                  >
+                    + {'{dynamic_description}'}
+                  </button>
+                </div>
                 <textarea
                   rows={3}
-                  placeholder="e.g. Daily Aarti video for {date}. Subscribe to {channel}."
+                  placeholder="e.g. {dynamic_description} or Daily video for {date}. Subscribe to {channel}."
                   value={descriptionTemplate}
                   onChange={(e) => setDescriptionTemplate(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500 transition resize-none"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500 transition resize-none font-mono"
                 />
               </div>
             </div>

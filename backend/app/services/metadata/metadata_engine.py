@@ -91,8 +91,9 @@ class MetadataEngine:
         year_str = target_datetime.strftime("%Y")  # "2026"
         formatted_date = f"{day_num} {month_name} {year_str}" # "15 August 2026"
 
-        # Resolve rotating hook if requested
+        # Resolve rotating hook & description if requested
         dynamic_hook = ""
+        dynamic_desc = ""
         target_preset = preset_category or "mahadev"
         resolved_hook = ContentPresetService.resolve_hook_for_date(
             preset_id=target_preset,
@@ -101,6 +102,14 @@ class MetadataEngine:
         )
         if resolved_hook:
             dynamic_hook = resolved_hook
+
+        resolved_desc = ContentPresetService.resolve_description_for_date(
+            preset_id=target_preset,
+            target_date=target_datetime,
+            rotation_index=rotation_index
+        )
+        if resolved_desc:
+            dynamic_desc = resolved_desc
 
         replacements = {
             "channel": channel_name,
@@ -113,6 +122,8 @@ class MetadataEngine:
             "category": category_name or "",
             "dynamic_hook": dynamic_hook,
             "hook": dynamic_hook,
+            "dynamic_description": dynamic_desc,
+            "description": dynamic_desc,
         }
 
         result = template
@@ -184,12 +195,17 @@ class MetadataEngine:
         if video_meta.get("description"):
             raw_desc = video_meta["description"]
             hierarchy_sources["description"] = "video_sidecar"
-        elif schedule and schedule.description_template:
-            raw_desc = schedule.description_template
-            hierarchy_sources["description"] = "schedule_template"
-        elif preset_info and preset_info.get("description"):
-            raw_desc = preset_info["description"]
-            hierarchy_sources["description"] = "preset_category_default"
+        elif schedule and schedule.description_template and schedule.description_template.strip():
+            # If user only wrote {dynamic_hook} in description, upgrade to full {dynamic_description}
+            if schedule.description_template.strip() in ["{dynamic_hook}", "{hook}"]:
+                raw_desc = "{dynamic_description}"
+                hierarchy_sources["description"] = "preset_dynamic_description"
+            else:
+                raw_desc = schedule.description_template
+                hierarchy_sources["description"] = "schedule_template"
+        elif preset_info:
+            raw_desc = "{dynamic_description}"
+            hierarchy_sources["description"] = "preset_dynamic_description"
         elif folder and folder.default_description_template:
             raw_desc = folder.default_description_template
             hierarchy_sources["description"] = "folder_default"
