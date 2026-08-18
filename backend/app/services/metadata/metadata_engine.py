@@ -5,6 +5,7 @@ from app.models.video import Video
 from app.models.folder import ContentFolder
 from app.models.schedule import Schedule
 from app.models.channel import Channel
+from app.services.metadata.content_presets import ContentPresetService
 
 
 class ResolvedMetadata:
@@ -16,7 +17,12 @@ class ResolvedMetadata:
         category_id: str,
         privacy_status: str,
         thumbnail_storage_id: Optional[str] = None,
-        source_hierarchy: Optional[Dict[str, str]] = None
+        source_hierarchy: Optional[Dict[str, str]] = None,
+        made_for_kids: bool = False,
+        age_restricted: bool = False,
+        default_language: Optional[str] = None,
+        default_audio_language: Optional[str] = None,
+        contains_synthetic_media: bool = False
     ):
         self.title = title
         self.description = description
@@ -25,6 +31,11 @@ class ResolvedMetadata:
         self.privacy_status = privacy_status
         self.thumbnail_storage_id = thumbnail_storage_id
         self.source_hierarchy = source_hierarchy or {}
+        self.made_for_kids = made_for_kids
+        self.age_restricted = age_restricted
+        self.default_language = default_language
+        self.default_audio_language = default_audio_language
+        self.contains_synthetic_media = contains_synthetic_media
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -34,7 +45,12 @@ class ResolvedMetadata:
             "category_id": self.category_id,
             "privacy_status": self.privacy_status,
             "thumbnail_storage_id": self.thumbnail_storage_id,
-            "source_hierarchy": self.source_hierarchy
+            "source_hierarchy": self.source_hierarchy,
+            "made_for_kids": self.made_for_kids,
+            "age_restricted": self.age_restricted,
+            "default_language": self.default_language,
+            "default_audio_language": self.default_audio_language,
+            "contains_synthetic_media": self.contains_synthetic_media
         }
 
 
@@ -46,17 +62,21 @@ class MetadataEngine:
         channel_name: str,
         video_filename: str,
         target_datetime: datetime,
-        category_name: Optional[str] = None
+        category_name: Optional[str] = None,
+        preset_category: Optional[str] = None,
+        rotation_index: Optional[int] = None
     ) -> str:
         """
         Substitute dynamic variables in title/description templates:
-          {channel} -> Channel display name
-          {date}    -> e.g. "15 August 2026"
-          {day}     -> e.g. "15" or "01"
-          {month}   -> e.g. "August"
-          {year}    -> e.g. "2026"
-          {filename}-> Base filename without extension e.g. "15" or "morning_aarti"
-          {category}-> Category name e.g. "Devotional"
+          {channel}      -> Channel display name
+          {date}         -> e.g. "15 August 2026"
+          {day}          -> e.g. "15" or "01"
+          {month}        -> e.g. "August"
+          {year}         -> e.g. "2026"
+          {filename}     -> Base filename without extension e.g. "15" or "morning_aarti"
+          {category}     -> Category name e.g. "Devotional"
+          {dynamic_hook} -> Rotated hook for the current day / rotation cycle
+          {hook}         -> Rotated hook for the current day / rotation cycle
         """
         if not template:
             return ""
@@ -71,6 +91,17 @@ class MetadataEngine:
         year_str = target_datetime.strftime("%Y")  # "2026"
         formatted_date = f"{day_num} {month_name} {year_str}" # "15 August 2026"
 
+        # Resolve rotating hook if requested
+        dynamic_hook = ""
+        target_preset = preset_category or "mahadev"
+        resolved_hook = ContentPresetService.resolve_hook_for_date(
+            preset_id=target_preset,
+            target_date=target_datetime,
+            rotation_index=rotation_index
+        )
+        if resolved_hook:
+            dynamic_hook = resolved_hook
+
         replacements = {
             "channel": channel_name,
             "date": formatted_date,
@@ -80,6 +111,8 @@ class MetadataEngine:
             "year": year_str,
             "filename": base_filename,
             "category": category_name or "",
+            "dynamic_hook": dynamic_hook,
+            "hook": dynamic_hook,
         }
 
         result = template
@@ -96,14 +129,15 @@ class MetadataEngine:
         channel: Optional[Channel] = None,
         folder: Optional[ContentFolder] = None,
         schedule: Optional[Schedule] = None,
-        target_datetime: Optional[datetime] = None
+        target_datetime: Optional[datetime] = None,
+        rotation_index: Optional[int] = None
     ) -> ResolvedMetadata:
         """
-        Resolve final video title, description, tags, category, privacy, and thumbnail
+        Resolve final video title, description, tags, category, privacy, language, audience and thumbnail
         according to the strict priority rules:
           Priority 1: Per-video sidecar metadata (.json) / custom overrides
           Priority 2: Folder default metadata
-          Priority 3: Schedule metadata
+          Priority 3: Schedule metadata & Preset category
           Priority 4: Channel default metadata
           Priority 5: Global defaults
         """
@@ -111,6 +145,9 @@ class MetadataEngine:
         channel_name = channel.name if channel else "YouTube Channel"
         video_meta = video.custom_metadata or {}
         hierarchy_sources: Dict[str, str] = {}
+
+        preset_category = schedule.preset_category if schedule else None
+        preset_info = ContentPresetService.get_preset(preset_category) if preset_category else None
 
         # 1. RESOLVE TITLE
         raw_title = None
@@ -120,6 +157,9 @@ class MetadataEngine:
         elif schedule and schedule.title_template:
             raw_title = schedule.title_template
             hierarchy_sources["title"] = "schedule_template"
+        elif preset_info and preset_info.get("hooks"):
+            raw_title = "{dynamic_hook}"
+            hierarchy_sources["title"] = "preset_category_hooks"
         elif folder and folder.default_title_template:
             raw_title = folder.default_title_template
             hierarchy_sources["title"] = "folder_default"
@@ -130,7 +170,14 @@ class MetadataEngine:
             raw_title = "{channel} | {date}"
             hierarchy_sources["title"] = "system_default"
 
-        title = cls.substitute_variables(raw_title, channel_name, video.filename, dt)
+        title = cls.substitute_variables(
+            template=raw_title,
+            channel_name=channel_name,
+            video_filename=video.filename,
+            target_datetime=dt,
+            preset_category=preset_category,
+            rotation_index=rotation_index
+        )
 
         # 2. RESOLVE DESCRIPTION
         raw_desc = None
@@ -140,6 +187,9 @@ class MetadataEngine:
         elif schedule and schedule.description_template:
             raw_desc = schedule.description_template
             hierarchy_sources["description"] = "schedule_template"
+        elif preset_info and preset_info.get("description"):
+            raw_desc = preset_info["description"]
+            hierarchy_sources["description"] = "preset_category_default"
         elif folder and folder.default_description_template:
             raw_desc = folder.default_description_template
             hierarchy_sources["description"] = "folder_default"
@@ -150,7 +200,14 @@ class MetadataEngine:
             raw_desc = "Uploaded via YouTube Automation Platform for {date}."
             hierarchy_sources["description"] = "system_default"
 
-        description = cls.substitute_variables(raw_desc, channel_name, video.filename, dt)
+        description = cls.substitute_variables(
+            template=raw_desc,
+            channel_name=channel_name,
+            video_filename=video.filename,
+            target_datetime=dt,
+            preset_category=preset_category,
+            rotation_index=rotation_index
+        )
 
         # 3. RESOLVE TAGS
         tags: List[str] = []
@@ -160,6 +217,9 @@ class MetadataEngine:
         elif schedule and schedule.tags and len(schedule.tags) > 0:
             tags = list(schedule.tags)
             hierarchy_sources["tags"] = "schedule_template"
+        elif preset_info and preset_info.get("tags") and len(preset_info["tags"]) > 0:
+            tags = list(preset_info["tags"])
+            hierarchy_sources["tags"] = "preset_category_default"
         elif folder and folder.default_tags and len(folder.default_tags) > 0:
             tags = list(folder.default_tags)
             hierarchy_sources["tags"] = "folder_default"
@@ -178,6 +238,9 @@ class MetadataEngine:
         elif schedule and schedule.category_id:
             category_id = schedule.category_id
             hierarchy_sources["category_id"] = "schedule_template"
+        elif preset_info and preset_info.get("category_id"):
+            category_id = str(preset_info["category_id"])
+            hierarchy_sources["category_id"] = "preset_category_default"
         elif folder and folder.default_category_id:
             category_id = folder.default_category_id
             hierarchy_sources["category_id"] = "folder_default"
@@ -212,6 +275,26 @@ class MetadataEngine:
             thumbnail_id = None
             hierarchy_sources["thumbnail"] = "none"
 
+        # 7. RESOLVE ADVANCED UPLOAD SETTINGS
+        made_for_kids = False
+        age_restricted = False
+        default_language = "hi"
+        default_audio_language = "hi"
+        contains_synthetic_media = False
+
+        if schedule:
+            made_for_kids = bool(schedule.made_for_kids)
+            age_restricted = bool(schedule.age_restricted)
+            default_language = schedule.default_language or (preset_info.get("default_language") if preset_info else None) or "hi"
+            default_audio_language = schedule.default_audio_language or (preset_info.get("default_audio_language") if preset_info else None) or "hi"
+            contains_synthetic_media = bool(schedule.contains_synthetic_media)
+        elif preset_info:
+            made_for_kids = bool(preset_info.get("made_for_kids", False))
+            age_restricted = bool(preset_info.get("age_restricted", False))
+            default_language = preset_info.get("default_language", "hi")
+            default_audio_language = preset_info.get("default_audio_language", "hi")
+            contains_synthetic_media = bool(preset_info.get("contains_synthetic_media", False))
+
         return ResolvedMetadata(
             title=title,
             description=description,
@@ -219,5 +302,10 @@ class MetadataEngine:
             category_id=category_id,
             privacy_status=privacy_status,
             thumbnail_storage_id=thumbnail_id,
-            source_hierarchy=hierarchy_sources
+            source_hierarchy=hierarchy_sources,
+            made_for_kids=made_for_kids,
+            age_restricted=age_restricted,
+            default_language=default_language,
+            default_audio_language=default_audio_language,
+            contains_synthetic_media=contains_synthetic_media
         )

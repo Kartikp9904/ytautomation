@@ -22,6 +22,12 @@ export interface ScheduleItem {
   tags: string[];
   category_id: string | null;
   privacy_status: string;
+  made_for_kids?: boolean;
+  age_restricted?: boolean;
+  default_language?: string | null;
+  default_audio_language?: string | null;
+  contains_synthetic_media?: boolean;
+  preset_category?: string | null;
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
@@ -121,6 +127,12 @@ export interface ScheduleCreateData {
   tags?: string[];
   category_id?: string;
   privacy_status?: string;
+  made_for_kids?: boolean;
+  age_restricted?: boolean;
+  default_language?: string;
+  default_audio_language?: string;
+  contains_synthetic_media?: boolean;
+  preset_category?: string;
 }
 
 export interface ScheduleFilterParams {

@@ -37,6 +37,14 @@ class Schedule(Base, TimestampMixin):
     category_id = Column(String(10), nullable=True)
     privacy_status = Column(String(20), default="private", nullable=False)
 
+    # Advanced YouTube Upload options
+    made_for_kids = Column(Boolean, default=False, nullable=False)
+    age_restricted = Column(Boolean, default=False, nullable=False)
+    default_language = Column(String(10), nullable=True) # e.g. "hi", "en"
+    default_audio_language = Column(String(10), nullable=True)
+    contains_synthetic_media = Column(Boolean, default=False, nullable=False)
+    preset_category = Column(String(50), nullable=True) # e.g. "mahadev", "shinchan"
+
     use_youtube_scheduled_publish = Column(Boolean, default=True, nullable=False)
     dry_run = Column(Boolean, default=False, nullable=False)
     enabled = Column(Boolean, default=True, nullable=False)

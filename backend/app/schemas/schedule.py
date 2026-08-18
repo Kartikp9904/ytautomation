@@ -28,6 +28,14 @@ class ScheduleBase(BaseModel):
     privacy_status: Optional[str] = "private"
     custom_thumbnail_file_id: Optional[str] = None
 
+    # Advanced YouTube Upload options
+    made_for_kids: bool = Field(default=False, description="Whether the video is made for kids")
+    age_restricted: bool = Field(default=False, description="Whether the video is 18+ only")
+    default_language: Optional[str] = Field(default=None, description="e.g. 'hi', 'en'")
+    default_audio_language: Optional[str] = Field(default=None, description="e.g. 'hi', 'en'")
+    contains_synthetic_media: bool = Field(default=False, description="Disclose altered or synthetic content")
+    preset_category: Optional[str] = Field(default=None, description="e.g. 'mahadev', 'shinchan'")
+
 
 class ScheduleCreate(ScheduleBase):
     pass
@@ -54,6 +62,13 @@ class ScheduleUpdate(BaseModel):
     category_id: Optional[str] = None
     privacy_status: Optional[str] = None
     custom_thumbnail_file_id: Optional[str] = None
+
+    made_for_kids: Optional[bool] = None
+    age_restricted: Optional[bool] = None
+    default_language: Optional[str] = None
+    default_audio_language: Optional[str] = None
+    contains_synthetic_media: Optional[bool] = None
+    preset_category: Optional[str] = None
 
 
 class ScheduleResponse(ScheduleBase):

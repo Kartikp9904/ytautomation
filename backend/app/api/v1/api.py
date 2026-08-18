@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, auth, channels, drive, videos, folders, schedules, youtube, uploads
+from app.api.v1.endpoints import health, auth, channels, drive, videos, folders, schedules, youtube, uploads, presets
 
 api_router = APIRouter()
 
@@ -12,3 +12,4 @@ api_router.include_router(folders.router, prefix="/folders", tags=["Folders"])
 api_router.include_router(schedules.router, prefix="/schedules", tags=["Schedules"])
 api_router.include_router(youtube.router, prefix="/youtube", tags=["YouTube OAuth & API"])
 api_router.include_router(uploads.router, prefix="/uploads", tags=["YouTube Uploads & Queue"])
+api_router.include_router(presets.router, prefix="/presets", tags=["Content Niche Presets & Hooks"])

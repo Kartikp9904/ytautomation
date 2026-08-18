@@ -69,3 +69,26 @@ export const deleteAndReplaceOccurrence = async (
   );
   return response.data;
 };
+
+export interface QuotaSummary {
+  daily_limit: number;
+  total_used_today: number;
+  total_remaining_today: number;
+  percent_used: number;
+  estimated_uploads_remaining: number;
+  seconds_until_reset: number;
+  resets_at: string;
+  channels: Array<{
+    channel_id: string;
+    channel_name: string;
+    used_units: number;
+    remaining_units: number;
+    estimated_uploads_remaining: number;
+  }>;
+}
+
+export const getQuotaSummary = async (): Promise<QuotaSummary> => {
+  const response = await apiClient.get<QuotaSummary>('/youtube/quota-summary');
+  return response.data;
+};
+

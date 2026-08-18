@@ -186,10 +186,13 @@ class YouTubeUploaderService:
                 # 7. Authenticate with YouTube API
                 youtube = await YouTubeOAuthService.get_authenticated_service(channel.id, session)
 
-                # 8. Configure status (privacy & publishAt ISO 8601)
+                # 8. Configure status (privacy & publishAt ISO 8601, madeForKids, synthetic media)
                 status_dict: Dict[str, Any] = {
-                    "selfDeclaredMadeForKids": False
+                    "selfDeclaredMadeForKids": bool(effective_meta.made_for_kids)
                 }
+
+                if hasattr(effective_meta, 'contains_synthetic_media') and effective_meta.contains_synthetic_media:
+                    status_dict["containsSyntheticMedia"] = True
 
                 if publish_at:
                     utc_publish_at = publish_at if publish_at.tzinfo else publish_at.replace(tzinfo=timezone.utc)
@@ -213,13 +216,20 @@ class YouTubeUploaderService:
                         else:
                             break
 
+                snippet_dict: Dict[str, Any] = {
+                    "title": final_title[:100],
+                    "description": final_desc[:5000],
+                    "tags": safe_tags,
+                    "categoryId": str(final_cat)
+                }
+
+                if effective_meta.default_language:
+                    snippet_dict["defaultLanguage"] = effective_meta.default_language
+                if effective_meta.default_audio_language:
+                    snippet_dict["defaultAudioLanguage"] = effective_meta.default_audio_language
+
                 body = {
-                    "snippet": {
-                        "title": final_title[:100],
-                        "description": final_desc[:5000],
-                        "tags": safe_tags,
-                        "categoryId": str(final_cat)
-                    },
+                    "snippet": snippet_dict,
                     "status": status_dict
                 }
 

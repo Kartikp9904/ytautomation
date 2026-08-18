@@ -4,6 +4,7 @@ import { getChannels } from '../api/channels';
 import { getTodayTimeline, type TimelineItem } from '../api/schedules';
 import { listUploadJobs } from '../api/uploads';
 import { WorkerPoolWidget } from '../components/dashboard/WorkerPoolWidget';
+import { QuotaTokenWidget } from '../components/dashboard/QuotaTokenWidget';
 import { 
   Tv, 
   CalendarDays, 
@@ -86,6 +87,9 @@ export const DashboardPage: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {/* Main YouTube API Token / Quota Widget */}
+      <QuotaTokenWidget />
 
       {/* Worker Pool & Concurrency Widget */}
       <WorkerPoolWidget />

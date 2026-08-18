@@ -3,6 +3,8 @@ import type { ScheduleItem, ScheduleCreateData } from '../../api/schedules';
 import type { Channel } from '../../api/channels';
 import type { ContentFolderItem, VideoItem } from '../../api/videos';
 import { YOUTUBE_CATEGORIES } from '../../constants/categories';
+import { getPresets, type ContentPreset } from '../../api/presets';
+import { PresetManagerModal } from './PresetManagerModal';
 import { 
   X, 
   Clock, 
@@ -12,7 +14,11 @@ import {
   CalendarCheck,
   FolderTree,
   Search,
-  Copy
+  Copy,
+  Settings2,
+  Globe,
+  Sliders,
+  Baby
 } from 'lucide-react';
 
 interface ScheduleModalProps {
@@ -65,6 +71,18 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [categoryId, setCategoryId] = useState('22');
   const [privacyStatus, setPrivacyStatus] = useState('private');
 
+  // Advanced YouTube Upload Options
+  const [madeForKids, setMadeForKids] = useState<boolean>(false);
+  const [ageRestricted, setAgeRestricted] = useState<boolean>(false);
+  const [defaultLanguage, setDefaultLanguage] = useState<string>('hi');
+  const [defaultAudioLanguage, setDefaultAudioLanguage] = useState<string>('hi');
+  const [containsSyntheticMedia, setContainsSyntheticMedia] = useState<boolean>(false);
+  const [presetCategory, setPresetCategory] = useState<string>('mahadev');
+
+  // Presets modal
+  const [isPresetModalOpen, setIsPresetModalOpen] = useState<boolean>(false);
+  const [presetsList, setPresetsList] = useState<ContentPreset[]>([]);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,6 +100,19 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       return f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q);
     })
     .sort((a, b) => a.path.localeCompare(b.path));
+
+  const loadPresetsList = async () => {
+    try {
+      const data = await getPresets();
+      setPresetsList(data);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    loadPresetsList();
+  }, []);
 
   useEffect(() => {
     if (schedule) {
@@ -103,6 +134,12 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       setTagsInput(schedule.tags?.join(', ') || '');
       setCategoryId(schedule.category_id || '22');
       setPrivacyStatus(schedule.privacy_status || 'private');
+      setMadeForKids(schedule.made_for_kids ?? false);
+      setAgeRestricted(schedule.age_restricted ?? false);
+      setDefaultLanguage(schedule.default_language || 'hi');
+      setDefaultAudioLanguage(schedule.default_audio_language || 'hi');
+      setContainsSyntheticMedia(schedule.contains_synthetic_media ?? false);
+      setPresetCategory(schedule.preset_category || 'mahadev');
     } else {
       setChannelId(channels[0]?.id || '');
       setName('');
@@ -118,11 +155,17 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       setSelectedDaysOfWeek(['MON', 'WED', 'FRI']);
       setDayOfMonth(1);
       setEnabled(true);
-      setTitleTemplate('');
+      setTitleTemplate('{dynamic_hook}');
       setDescriptionTemplate('');
       setTagsInput('');
       setCategoryId('22');
       setPrivacyStatus('private');
+      setMadeForKids(false);
+      setAgeRestricted(false);
+      setDefaultLanguage('hi');
+      setDefaultAudioLanguage('hi');
+      setContainsSyntheticMedia(false);
+      setPresetCategory('mahadev');
     }
     setError(null);
   }, [schedule, isOpen, channels, folders]);
@@ -192,6 +235,12 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         tags: tags.length > 0 ? tags : undefined,
         category_id: categoryId,
         privacy_status: privacyStatus,
+        made_for_kids: madeForKids,
+        age_restricted: ageRestricted,
+        default_language: defaultLanguage,
+        default_audio_language: defaultAudioLanguage,
+        contains_synthetic_media: containsSyntheticMedia,
+        preset_category: presetCategory || undefined,
       };
 
       await onSave(payload);
@@ -201,6 +250,18 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleApplyPreset = (preset: ContentPreset) => {
+    setPresetCategory(preset.id);
+    setTitleTemplate('{dynamic_hook}');
+    if (preset.description) setDescriptionTemplate(preset.description);
+    if (preset.tags && preset.tags.length > 0) setTagsInput(preset.tags.join(', '));
+    if (preset.category_id) setCategoryId(preset.category_id);
+    if (preset.default_language) setDefaultLanguage(preset.default_language);
+    if (preset.default_audio_language) setDefaultAudioLanguage(preset.default_audio_language);
+    if (preset.made_for_kids !== undefined) setMadeForKids(preset.made_for_kids);
+    if (preset.age_restricted !== undefined) setAgeRestricted(preset.age_restricted);
   };
 
   return (
@@ -543,18 +604,97 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               </div>
             </div>
 
+            {/* Niche Preset Category & 31-Day Hook Selector */}
+            <div className="p-4 rounded-xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-white">Content Niche & 31-Day Hook Preset</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                    Auto-Rotate 31+ Titles
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPresetModalOpen(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 text-xs font-medium border border-slate-700 transition cursor-pointer"
+                >
+                  <Settings2 className="w-3.5 h-3.5" />
+                  Manage & Upload Hooks
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const m = presetsList.find((p) => p.id === 'mahadev');
+                    if (m) handleApplyPreset(m);
+                    else setPresetCategory('mahadev');
+                  }}
+                  className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col gap-0.5 ${
+                    presetCategory === 'mahadev'
+                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                      : 'bg-slate-950/60 hover:bg-slate-900 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  <span className="text-xs font-bold text-white">🔱 Mahadev Niche</span>
+                  <span className="text-[10px] text-slate-400">35+ Universal status hooks</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const s = presetsList.find((p) => p.id === 'shinchan');
+                    if (s) handleApplyPreset(s);
+                    else setPresetCategory('shinchan');
+                  }}
+                  className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col gap-0.5 ${
+                    presetCategory === 'shinchan'
+                      ? 'bg-red-500/15 border-red-500/40 text-red-200'
+                      : 'bg-slate-950/60 hover:bg-slate-900 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  <span className="text-xs font-bold text-white">😂 Shinchan Niche</span>
+                  <span className="text-[10px] text-slate-400">35+ Comedy hooks</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPresetCategory('')}
+                  className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col gap-0.5 ${
+                    !presetCategory
+                      ? 'bg-slate-800 border-slate-600 text-white'
+                      : 'bg-slate-950/60 hover:bg-slate-900 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  <span className="text-xs font-bold text-white">Custom / None</span>
+                  <span className="text-[10px] text-slate-400">Manual metadata rules</span>
+                </button>
+              </div>
+            </div>
+
             {/* Template Variables Helper */}
             <div className="p-3.5 rounded-xl bg-slate-950/40 border border-slate-800 space-y-2">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Click variable to insert into Title:
+              <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Click variable to insert into Title:
+                </span>
+                <span className="text-[11px] text-emerald-400 font-mono">
+                  {'{dynamic_hook}'} = Unique hook every day
+                </span>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {['{channel}', '{date}', '{day}', '{month}', '{year}', '{filename}'].map((v) => (
+                {['{dynamic_hook}', '{channel}', '{date}', '{day}', '{month}', '{year}', '{filename}'].map((v) => (
                   <button
                     key={v}
                     type="button"
                     onClick={() => insertVariable(v, 'title')}
-                    className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-red-400 hover:text-red-300 font-mono text-[11px] border border-slate-800 transition cursor-pointer"
+                    className={`px-2 py-0.5 rounded font-mono text-[11px] border transition cursor-pointer ${
+                      v === '{dynamic_hook}'
+                        ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/30 font-bold'
+                        : 'bg-slate-900 hover:bg-slate-800 text-red-400 hover:text-red-300 border-slate-800'
+                    }`}
                   >
                     {v}
                   </button>
@@ -566,14 +706,14 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Title Template Override (Optional)
+                  Title Template Override (Use {'{dynamic_hook}'} for 31-day auto-rotation)
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. {channel} | Special Darshan for {date}"
+                  placeholder="e.g. {dynamic_hook} or {channel} | {date}"
                   value={titleTemplate}
                   onChange={(e) => setTitleTemplate(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500 transition"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500 transition font-mono"
                 />
               </div>
 
@@ -597,7 +737,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">Tags (Comma-separated)</label>
                 <input
                   type="text"
-                  placeholder="aarti, bhajan, daily"
+                  placeholder="mahadev, shorts, shivbhakti"
                   value={tagsInput}
                   onChange={(e) => setTagsInput(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-red-500 transition"
@@ -632,6 +772,100 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                 </select>
               </div>
             </div>
+
+            {/* Advanced YouTube Upload & Audience Settings */}
+            <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-4">
+              <div className="flex items-center gap-2 text-xs font-bold text-white border-b border-slate-800/80 pb-2">
+                <Sliders className="w-4 h-4 text-blue-400" />
+                <span>Advanced YouTube Upload & Audience Settings</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Made for Kids */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Baby className="w-3.5 h-3.5 text-pink-400" /> Audience (Made for Kids)
+                  </label>
+                  <select
+                    value={madeForKids ? 'yes' : 'no'}
+                    onChange={(e) => setMadeForKids(e.target.value === 'yes')}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-red-500"
+                  >
+                    <option value="no">No, it's not made for kids (Recommended for Shorts Feed)</option>
+                    <option value="yes">Yes, it's made for kids</option>
+                  </select>
+                </div>
+
+                {/* Age Restriction */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <ShieldAlert className="w-3.5 h-3.5 text-amber-400" /> Age Restriction
+                  </label>
+                  <select
+                    value={ageRestricted ? 'yes' : 'no'}
+                    onChange={(e) => setAgeRestricted(e.target.value === 'yes')}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-red-500"
+                  >
+                    <option value="no">No, don't restrict to viewers 18 and older</option>
+                    <option value="yes">Yes, restrict to viewers 18 and older (18+)</option>
+                  </select>
+                </div>
+
+                {/* Video Language */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-emerald-400" /> Video Language
+                  </label>
+                  <select
+                    value={defaultLanguage}
+                    onChange={(e) => setDefaultLanguage(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-red-500"
+                  >
+                    <option value="hi">Hindi (hi)</option>
+                    <option value="en">English (en)</option>
+                    <option value="mr">Marathi (mr)</option>
+                    <option value="gu">Gujarati (gu)</option>
+                    <option value="ta">Tamil (ta)</option>
+                    <option value="te">Telugu (te)</option>
+                    <option value="bn">Bengali (bn)</option>
+                  </select>
+                </div>
+
+                {/* Audio Language */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-cyan-400" /> Audio Language
+                  </label>
+                  <select
+                    value={defaultAudioLanguage}
+                    onChange={(e) => setDefaultAudioLanguage(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-red-500"
+                  >
+                    <option value="hi">Hindi (hi)</option>
+                    <option value="en">English (en)</option>
+                    <option value="mr">Marathi (mr)</option>
+                    <option value="gu">Gujarati (gu)</option>
+                    <option value="ta">Tamil (ta)</option>
+                    <option value="te">Telugu (te)</option>
+                    <option value="bn">Bengali (bn)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Altered / Synthetic Media Checkbox */}
+              <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-medium text-slate-200 block">Altered or Synthetic Content</span>
+                  <span className="text-[11px] text-slate-400 block">Check if content is generated by AI or significantly altered</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={containsSyntheticMedia}
+                  onChange={(e) => setContainsSyntheticMedia(e.target.checked)}
+                  className="w-4 h-4 text-red-600 rounded bg-slate-900 border-slate-700 focus:ring-red-500 cursor-pointer"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Footer */}
@@ -653,6 +887,22 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Preset & Hook Manager Modal */}
+      {isPresetModalOpen && (
+        <PresetManagerModal
+          isOpen={isPresetModalOpen}
+          onClose={() => {
+            setIsPresetModalOpen(false);
+            loadPresetsList();
+          }}
+          onSelectPreset={(p) => {
+            handleApplyPreset(p);
+            setIsPresetModalOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };
+

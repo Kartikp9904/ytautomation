@@ -163,3 +163,55 @@ async def delete_and_replace_occurrence(
     except Exception as e:
         logger.error(f"Failed to delete and replace occurrence {occurrence_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/quota-summary")
+async def get_quota_summary(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Returns global and per-channel YouTube API quota (tokens) tracking information.
+    """
+    from app.services.youtube.quota_tracker import YouTubeQuotaTracker, DAILY_QUOTA_LIMIT, QUOTA_VIDEO_UPLOAD
+    from app.models.channel import Channel
+    from sqlalchemy import select
+    from datetime import datetime, timezone, timedelta
+
+    # 1. Fetch all channels
+    ch_stmt = select(Channel)
+    ch_res = await db.execute(ch_stmt)
+    channels = ch_res.scalars().all()
+
+    channel_breakdown = []
+    total_used = 0
+
+    for ch in channels:
+        used = await YouTubeQuotaTracker.get_used_quota(ch.id, db)
+        total_used += used
+        channel_breakdown.append({
+            "channel_id": ch.id,
+            "channel_name": ch.name,
+            "used_units": used,
+            "remaining_units": max(0, DAILY_QUOTA_LIMIT - used),
+            "estimated_uploads_remaining": max(0, (DAILY_QUOTA_LIMIT - used) // QUOTA_VIDEO_UPLOAD)
+        })
+
+    # Calculate UTC midnight reset
+    now_utc = datetime.now(timezone.utc)
+    tomorrow_utc = (now_utc + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    seconds_until_reset = int((tomorrow_utc - now_utc).total_seconds())
+
+    remaining_units = max(0, DAILY_QUOTA_LIMIT - total_used)
+    percent_used = round((total_used / DAILY_QUOTA_LIMIT) * 100, 1) if DAILY_QUOTA_LIMIT > 0 else 0
+
+    return {
+        "daily_limit": DAILY_QUOTA_LIMIT,
+        "total_used_today": total_used,
+        "total_remaining_today": remaining_units,
+        "percent_used": min(100.0, percent_used),
+        "estimated_uploads_remaining": remaining_units // QUOTA_VIDEO_UPLOAD,
+        "seconds_until_reset": seconds_until_reset,
+        "resets_at": tomorrow_utc.isoformat(),
+        "channels": channel_breakdown
+    }
+
