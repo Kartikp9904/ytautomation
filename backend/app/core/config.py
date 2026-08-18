@@ -67,6 +67,11 @@ class Settings(BaseSettings):
 
     @field_validator("SYNC_DATABASE_URL", mode="before")
     def format_sync_db_url(cls, v):
+        # Check if environment variable DATABASE_URL is postgres while SYNC_DATABASE_URL is default/empty
+        raw_db_url = os.environ.get("DATABASE_URL", "")
+        if (not v or "sqlite" in v) and raw_db_url and ("postgres" in raw_db_url):
+            v = raw_db_url
+
         if isinstance(v, str):
             if v.startswith("postgres://"):
                 return v.replace("postgres://", "postgresql+psycopg2://", 1)
