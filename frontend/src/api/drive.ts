@@ -52,11 +52,17 @@ export const triggerScan = async (
   channelId?: string,
   provider?: string
 ): Promise<ScanSummary> => {
-  const response = await apiClient.post<ScanSummary>('/drive/scan', {
-    root_folder_id: rootFolderId,
-    channel_id: channelId,
-    provider,
-  });
+  const response = await apiClient.post<ScanSummary>(
+    '/drive/scan',
+    {
+      root_folder_id: rootFolderId,
+      channel_id: channelId,
+      provider,
+    },
+    {
+      timeout: 300000, // 5 minutes for large drive scans
+    }
+  );
   return response.data;
 };
 
