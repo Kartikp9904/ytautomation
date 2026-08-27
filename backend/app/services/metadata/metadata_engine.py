@@ -85,11 +85,15 @@ class MetadataEngine:
         base_filename = video_filename.rsplit(".", 1)[0] if "." in video_filename else video_filename
 
         # Date formatters
-        day_str = target_datetime.strftime("%d") # "15"
-        day_num = str(target_datetime.day)       # "15" or "5"
+        day_str = target_datetime.strftime("%d") # "27"
+        day_num = str(target_datetime.day)       # "27"
         month_name = target_datetime.strftime("%B") # "August"
+        month_short = target_datetime.strftime("%b") # "Aug"
+        month_num = target_datetime.strftime("%m") # "08"
         year_str = target_datetime.strftime("%Y")  # "2026"
-        formatted_date = f"{day_num} {month_name} {year_str}" # "15 August 2026"
+        weekday_name = target_datetime.strftime("%A") # "Thursday"
+        weekday_short = target_datetime.strftime("%a") # "Thu"
+        formatted_date = f"{day_num} {month_name} {year_str}" # "27 August 2026"
 
         # Resolve rotating hook & description if requested
         dynamic_hook = ""
@@ -113,11 +117,19 @@ class MetadataEngine:
 
         replacements = {
             "channel": channel_name,
-            "date": formatted_date,
+            "date": day_str,
+            "full_date": formatted_date,
+            "date_full": formatted_date,
+            "today": formatted_date,
             "day": day_str,
             "day_num": day_num,
             "month": month_name,
+            "month_name": month_name,
+            "month_short": month_short,
+            "month_num": month_num,
             "year": year_str,
+            "weekday": weekday_name,
+            "weekday_short": weekday_short,
             "filename": base_filename,
             "category": category_name or "",
             "dynamic_hook": dynamic_hook,
@@ -178,7 +190,7 @@ class MetadataEngine:
             raw_title = channel.default_title_template
             hierarchy_sources["title"] = "channel_default"
         else:
-            raw_title = "{channel} | {date}"
+            raw_title = "{channel} | {full_date}"
             hierarchy_sources["title"] = "system_default"
 
         title = cls.substitute_variables(
@@ -213,7 +225,7 @@ class MetadataEngine:
             raw_desc = channel.default_description_template
             hierarchy_sources["description"] = "channel_default"
         else:
-            raw_desc = "Uploaded via YouTube Automation Platform for {date}."
+            raw_desc = "Uploaded via YouTube Automation Platform for {full_date}."
             hierarchy_sources["description"] = "system_default"
 
         description = cls.substitute_variables(

@@ -16,7 +16,7 @@ async def test_repeat_mode_resolution(test_db_session: AsyncSession):
     channel = Channel(
         name="Evergreen Channel",
         timezone="Asia/Kolkata",
-        default_title_template="Daily Meditation | {date} | {channel}"
+        default_title_template="Daily Meditation | {full_date} | {channel}"
     )
     test_db_session.add(channel)
     await test_db_session.commit()

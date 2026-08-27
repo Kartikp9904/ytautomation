@@ -136,7 +136,7 @@ class GoogleDriveOAuthService:
         if cred.is_valid and cred.encrypted_refresh_token:
             try:
                 refresh_token = decrypt_token(cred.encrypted_refresh_token)
-                if refresh_token and settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET:
+                if refresh_token and not refresh_token.startswith("dummy_") and settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET:
                     token_url = "https://oauth2.googleapis.com/token"
                     data = {
                         "client_id": settings.GOOGLE_CLIENT_ID,

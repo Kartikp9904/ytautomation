@@ -682,22 +682,32 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Click variable to insert into Title:
                 </span>
                 <span className="text-[11px] text-emerald-400 font-mono">
-                  {'{dynamic_hook}'} = Unique hook every day
+                  {'{date} {month} {year}'} = 27 August 2026
                 </span>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {['{dynamic_hook}', '{channel}', '{date}', '{day}', '{month}', '{year}', '{filename}'].map((v) => (
+                {[
+                  { tag: '{dynamic_hook}', label: '⚡ Dynamic Viral Hook' },
+                  { tag: '{channel}', label: 'Channel Name' },
+                  { tag: '{date}', label: 'Date (27)' },
+                  { tag: '{month}', label: 'Month (August)' },
+                  { tag: '{year}', label: 'Year (2026)' },
+                  { tag: '{full_date}', label: 'Full Date (27 August 2026)' },
+                  { tag: '{weekday}', label: 'Weekday (Thursday)' },
+                  { tag: '{filename}', label: 'Video Filename' },
+                ].map(({ tag, label }) => (
                   <button
-                    key={v}
+                    key={tag}
                     type="button"
-                    onClick={() => insertVariable(v, 'title')}
+                    title={label}
+                    onClick={() => insertVariable(tag, 'title')}
                     className={`px-2 py-0.5 rounded font-mono text-[11px] border transition cursor-pointer ${
-                      v === '{dynamic_hook}'
+                      tag === '{dynamic_hook}'
                         ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/30 font-bold'
                         : 'bg-slate-900 hover:bg-slate-800 text-red-400 hover:text-red-300 border-slate-800'
                     }`}
                   >
-                    {v}
+                    {tag}
                   </button>
                 ))}
               </div>

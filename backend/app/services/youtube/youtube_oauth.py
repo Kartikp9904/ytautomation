@@ -283,7 +283,7 @@ class YouTubeOAuthService:
         if oauth_cred and oauth_cred.is_valid and oauth_cred.encrypted_refresh_token:
             try:
                 refresh_tok = decrypt_secret(oauth_cred.encrypted_refresh_token)
-                if refresh_tok and settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET:
+                if refresh_tok and not refresh_tok.startswith("dummy_") and settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET:
                     token_url = "https://oauth2.googleapis.com/token"
                     data = {
                         "client_id": settings.GOOGLE_CLIENT_ID,

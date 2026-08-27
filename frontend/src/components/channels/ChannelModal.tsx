@@ -203,7 +203,7 @@ export const ChannelModal: React.FC<ChannelModalProps> = ({
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 font-mono text-xs placeholder-slate-500 focus:outline-none focus:border-red-500 transition"
               />
               <div className="flex flex-wrap gap-1.5 mt-2">
-                {['channel', 'date', 'day', 'month', 'year', 'filename'].map((v) => (
+                {['channel', 'date', 'month', 'year', 'full_date', 'weekday', 'filename'].map((v) => (
                   <button
                     key={v}
                     type="button"
