@@ -265,7 +265,7 @@ class YouTubeOAuthService:
         channel_id: str,
         db: AsyncSession
     ) -> Dict[str, Any]:
-        """Returns connection status, quota usage, and channel info"""
+        """Returns connection status, quota usage, and channel info with live token health validation"""
         stmt = select(Channel).where(Channel.id == channel_id)
         res = await db.execute(stmt)
         channel = res.scalars().first()
@@ -278,6 +278,36 @@ class YouTubeOAuthService:
         )
         cred_res = await db.execute(cred_stmt)
         oauth_cred = cred_res.scalars().first()
+
+        # Perform live token health check if credential exists
+        if oauth_cred and oauth_cred.is_valid and oauth_cred.encrypted_refresh_token:
+            try:
+                refresh_tok = decrypt_secret(oauth_cred.encrypted_refresh_token)
+                if refresh_tok and settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET:
+                    token_url = "https://oauth2.googleapis.com/token"
+                    data = {
+                        "client_id": settings.GOOGLE_CLIENT_ID,
+                        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                        "refresh_token": refresh_tok,
+                        "grant_type": "refresh_token"
+                    }
+                    async with httpx.AsyncClient(timeout=8.0) as client:
+                        resp = await client.post(token_url, data=data)
+                        if resp.status_code == 200:
+                            tdata = resp.json()
+                            access_tok = tdata.get("access_token")
+                            expires_in = tdata.get("expires_in", 3600)
+                            oauth_cred.encrypted_access_token = encrypt_secret(access_tok)
+                            oauth_cred.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                            oauth_cred.is_valid = True
+                            oauth_cred.last_error = None
+                            await db.commit()
+                        elif resp.status_code == 400 and any(err in resp.text.lower() for err in ["invalid_grant", "expired", "revoked"]):
+                            oauth_cred.is_valid = False
+                            oauth_cred.last_error = "Google OAuth token expired or revoked. Please reconnect your channel."
+                            await db.commit()
+            except Exception as e:
+                logger.warning(f"YouTube token health check notice for channel {channel_id}: {e}")
 
         quota_used = await YouTubeQuotaTracker.get_used_quota(channel_id, db)
 

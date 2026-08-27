@@ -149,11 +149,13 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             <div className="flex items-center gap-2">
               {isConnected ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              ) : ytStatus?.last_error ? (
+                <AlertCircle className="w-4 h-4 text-rose-400 animate-pulse" />
               ) : (
                 <AlertCircle className="w-4 h-4 text-amber-400" />
               )}
-              <span className="text-slate-300 font-medium">
-                {isConnected ? 'YouTube Authorized' : 'YouTube Not Connected'}
+              <span className={`font-medium ${isConnected ? 'text-slate-300' : ytStatus?.last_error ? 'text-rose-400 font-semibold' : 'text-slate-300'}`}>
+                {isConnected ? 'YouTube Authorized' : ytStatus?.last_error ? 'Token Expired / Disconnected' : 'YouTube Not Connected'}
               </span>
             </div>
 
@@ -169,12 +171,22 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
               <button
                 onClick={handleConnectYouTube}
                 disabled={connecting}
-                className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white font-medium text-[11px] transition cursor-pointer shadow"
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-white font-medium text-[11px] transition cursor-pointer shadow ${
+                  ytStatus?.last_error
+                    ? 'bg-rose-600 hover:bg-rose-500 animate-pulse'
+                    : 'bg-red-600 hover:bg-red-500'
+                }`}
               >
-                <ExternalLink className="w-3 h-3" /> Connect
+                <ExternalLink className="w-3 h-3" /> {ytStatus?.last_error ? 'Reconnect Channel' : 'Connect'}
               </button>
             )}
           </div>
+
+          {!isConnected && ytStatus?.last_error && (
+            <div className="p-2 rounded bg-rose-500/10 border border-rose-500/20 text-[11px] text-rose-300 leading-snug">
+              ⚠️ {ytStatus.last_error}
+            </div>
+          )}
 
           {isConnected && (
             <div className="pt-1.5 border-t border-slate-800/60 space-y-1.5 text-[11px]">

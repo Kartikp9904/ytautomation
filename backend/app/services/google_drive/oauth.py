@@ -124,12 +124,50 @@ class GoogleDriveOAuthService:
         result = await db.execute(stmt)
         cred = result.scalars().first()
 
-        if not cred or not cred.is_valid:
+        if not cred:
             return {
                 "connected": False,
                 "account_email": None,
                 "has_credentials": bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET),
-                "last_error": cred.last_error if cred else None
+                "last_error": None
+            }
+
+        # Check token validity live with Google
+        if cred.is_valid and cred.encrypted_refresh_token:
+            try:
+                refresh_token = decrypt_token(cred.encrypted_refresh_token)
+                if refresh_token and settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET:
+                    token_url = "https://oauth2.googleapis.com/token"
+                    data = {
+                        "client_id": settings.GOOGLE_CLIENT_ID,
+                        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                        "refresh_token": refresh_token,
+                        "grant_type": "refresh_token"
+                    }
+                    async with httpx.AsyncClient(timeout=8.0) as client:
+                        resp = await client.post(token_url, data=data)
+                        if resp.status_code == 200:
+                            tdata = resp.json()
+                            access_token = tdata.get("access_token")
+                            expires_in = tdata.get("expires_in", 3600)
+                            cred.encrypted_access_token = encrypt_token(access_token)
+                            cred.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                            cred.is_valid = True
+                            cred.last_error = None
+                            await db.commit()
+                        elif resp.status_code == 400 and any(err in resp.text.lower() for err in ["invalid_grant", "revoked", "expired"]):
+                            cred.is_valid = False
+                            cred.last_error = "Google Drive OAuth token expired or revoked. Please reconnect Google Drive."
+                            await db.commit()
+            except Exception as e:
+                logger.warning(f"Google Drive token health check notice: {e}")
+
+        if not cred.is_valid:
+            return {
+                "connected": False,
+                "account_email": cred.account_email,
+                "has_credentials": bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET),
+                "last_error": cred.last_error or "Token expired. Please reconnect Google Drive."
             }
 
         return {
