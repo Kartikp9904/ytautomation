@@ -10,6 +10,7 @@ from app.models.oauth import OAuthCredential
 from app.models.state import RotationState, ShuffleState
 from app.models.setting import SystemSetting
 from app.models.log import SystemLog
+from app.models.channel_sync import SourceChannelSync, SyncedSourceVideo
 
 __all__ = [
     "Base",
@@ -26,4 +27,6 @@ __all__ = [
     "ShuffleState",
     "SystemSetting",
     "SystemLog",
+    "SourceChannelSync",
+    "SyncedSourceVideo",
 ]

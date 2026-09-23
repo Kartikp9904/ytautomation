@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   Tv,
+  Radio,
   HardDrive,
   Film,
   CalendarDays,
@@ -23,6 +24,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Channels', path: '/channels', icon: Tv },
+  { name: 'Channel Auto-Sync', path: '/channel-sync', icon: Radio },
   { name: 'Google Drive', path: '/drive', icon: HardDrive },
   { name: 'Video Library', path: '/videos', icon: Film },
   { name: 'Schedules', path: '/schedules', icon: CalendarDays },

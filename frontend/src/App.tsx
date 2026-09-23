@@ -11,6 +11,7 @@ import { UploadHistoryPage } from './pages/UploadHistoryPage';
 import { FailedJobsPage } from './pages/FailedJobsPage';
 import { LogsPage } from './pages/LogsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { ChannelSyncPage } from './pages/ChannelSyncPage';
 
 export const App: React.FC = () => {
   return (
@@ -19,6 +20,7 @@ export const App: React.FC = () => {
         <Route path="/" element={<Layout />}>
           <Route index element={<DashboardPage />} />
           <Route path="channels" element={<ChannelsPage />} />
+          <Route path="channel-sync" element={<ChannelSyncPage />} />
           <Route path="drive" element={<DriveBrowserPage />} />
           <Route path="videos" element={<VideoLibraryPage />} />
           <Route path="schedules" element={<SchedulesPage />} />

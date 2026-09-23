@@ -95,7 +95,14 @@ async def test_per_channel_concurrency_serialization(test_db_session: AsyncSessi
         await asyncio.sleep(0.05)
         return {"status": "SUCCESS"}
 
-    with patch("app.services.worker.worker_pool.YouTubeUploaderService.run_upload_job", side_effect=mock_upload):
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def mock_session_ctx():
+        yield test_db_session
+
+    with patch("app.services.worker.worker_pool.YouTubeUploaderService.run_upload_job", side_effect=mock_upload), \
+         patch("app.services.worker.worker_pool.AsyncSessionLocal", side_effect=mock_session_ctx):
         pool = UploadWorkerPool.get_instance()
         # Set small cooldown for test speed
         pool.cooldown_seconds = 0.01
