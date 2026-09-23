@@ -3,11 +3,13 @@ import tempfile
 import asyncio
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
 from googleapiclient.http import MediaFileUpload
 
+from app.core.database import AsyncSessionLocal
 from app.models.channel_sync import SourceChannelSync, SyncedSourceVideo
 from app.models.channel import Channel
 from app.schemas.channel_sync import (
@@ -75,6 +77,12 @@ class ChannelSyncService:
                 sync_mode=cfg.sync_mode,
                 auto_publish=cfg.auto_publish,
                 publish_privacy_status=cfg.publish_privacy_status,
+                publish_mode=cfg.publish_mode or "SCHEDULED",
+                daily_publish_count=cfg.daily_publish_count or 3,
+                publish_time_slots=cfg.publish_time_slots or ["10:00", "15:00", "20:00"],
+                timezone=cfg.timezone or "UTC",
+                max_video_size_mb=cfg.max_video_size_mb or 300,
+                last_scheduled_slot_published=cfg.last_scheduled_slot_published,
                 title_prefix=cfg.title_prefix,
                 title_suffix=cfg.title_suffix,
                 description_footer=cfg.description_footer,
@@ -117,6 +125,11 @@ class ChannelSyncService:
             sync_mode=data.sync_mode,
             auto_publish=data.auto_publish,
             publish_privacy_status=data.publish_privacy_status,
+            publish_mode=data.publish_mode or "SCHEDULED",
+            daily_publish_count=data.daily_publish_count or 3,
+            publish_time_slots=data.publish_time_slots or ["10:00", "15:00", "20:00"],
+            timezone=data.timezone or "UTC",
+            max_video_size_mb=data.max_video_size_mb or 300,
             title_prefix=data.title_prefix,
             title_suffix=data.title_suffix,
             description_footer=data.description_footer,
@@ -282,7 +295,7 @@ class ChannelSyncService:
                 if videos_downloaded >= max_videos_to_download:
                     break
 
-                # Create record
+                # Create record - STAGED (Metadata only stored in DB! Zero video file bytes on disk)
                 synced_video = SyncedSourceVideo(
                     sync_id=cfg.id,
                     source_video_id=v_id,
@@ -293,49 +306,26 @@ class ChannelSyncService:
                     thumbnail_url=entry.get("thumbnail"),
                     duration_seconds=v_duration,
                     is_short=is_short,
-                    download_status="DOWNLOADING",
+                    download_status="STAGED",
                     upload_status="PENDING"
                 )
                 db.add(synced_video)
                 await db.commit()
                 await db.refresh(synced_video)
+                videos_downloaded += 1
 
-                # Download video & full metadata
-                try:
-                    logger.info(f"Downloading source video '{v_title}' ({v_id})...")
-                    dl_result = await asyncio.to_thread(cls._download_video_and_metadata_sync, v_url, temp_dir)
-                    full_info = dl_result.get("info") or {}
-                    filepath = dl_result.get("filepath")
-
-                    if filepath and os.path.exists(filepath):
-                        synced_video.local_temp_path = filepath
-                        synced_video.download_status = "DOWNLOADED"
-                        synced_video.title = full_info.get("title") or synced_video.title
-                        synced_video.description = full_info.get("description") or synced_video.description
-                        synced_video.tags = full_info.get("tags") or synced_video.tags
-                        synced_video.category_id = str(full_info.get("categories", ["20"])[0]) if full_info.get("categories") else "20"
-                        await db.commit()
-                        videos_downloaded += 1
-                    else:
-                        synced_video.download_status = "FAILED"
-                        synced_video.error_message = "File was not saved by downloader."
-                        await db.commit()
-                        continue
-
-                    # 4. Auto-Publish if enabled
-                    if cfg.auto_publish and synced_video.download_status == "DOWNLOADED":
+                # If IMMEDIATE mode or legacy auto_publish is set, trigger single upload right away
+                if (cfg.publish_mode == "IMMEDIATE" or cfg.auto_publish):
+                    try:
+                        logger.info(f"Immediate publish mode enabled: uploading video '{v_title}' ({v_id})...")
                         await cls.upload_synced_video(db, synced_video.id)
                         videos_uploaded += 1
-
-                except Exception as dl_err:
-                    logger.error(f"Failed to download/process video {v_id}: {dl_err}", exc_info=True)
-                    synced_video.download_status = "FAILED"
-                    synced_video.error_message = str(dl_err)
-                    await db.commit()
+                    except Exception as up_err:
+                        logger.error(f"Immediate upload failed for video {v_id}: {up_err}")
 
             return SyncTriggerResponse(
                 success=True,
-                message=f"Sync completed successfully. Found {videos_found} videos, downloaded {videos_downloaded}, uploaded {videos_uploaded}.",
+                message=f"Sync completed. Ingested {videos_downloaded} new video(s). {videos_uploaded} published immediately, remainder queued for scheduled publishing.",
                 videos_found=videos_found,
                 videos_downloaded=videos_downloaded,
                 videos_uploaded=videos_uploaded
@@ -355,7 +345,11 @@ class ChannelSyncService:
 
     @classmethod
     async def upload_synced_video(cls, db: AsyncSession, synced_video_id: str) -> SyncedSourceVideo:
-        """Uploads a downloaded synced video to the target YouTube channel"""
+        """
+        Just-In-Time 1-by-1 Uploader:
+        Downloads ONLY this single video, checks file size limit, uploads to YouTube,
+        and GUARANTEES immediate deletion from disk upon completion or failure.
+        """
         stmt = select(SyncedSourceVideo).where(SyncedSourceVideo.id == synced_video_id)
         res = await db.execute(stmt)
         v = res.scalars().first()
@@ -370,22 +364,44 @@ class ChannelSyncService:
         if not target_channel:
             raise ValueError(f"Target YouTube channel with ID '{cfg.target_channel_id}' not found.")
 
-        if not v.local_temp_path or not os.path.exists(v.local_temp_path):
-            # Re-download if file missing
-            temp_dir = tempfile.mkdtemp(prefix="yt_upload_")
-            dl_result = await asyncio.to_thread(cls._download_video_and_metadata_sync, v.source_url, temp_dir)
-            v.local_temp_path = dl_result.get("filepath")
-            if not v.local_temp_path or not os.path.exists(v.local_temp_path):
-                raise ValueError(f"Could not locate downloaded file for video '{v.title}'.")
-
-        v.upload_status = "UPLOADING"
-        await db.commit()
+        temp_dir = None
+        active_filepath = None
 
         try:
-            # 1. Authenticate with target YouTube channel
+            # 1. Just-In-Time download for this single video if not already present
+            if not v.local_temp_path or not os.path.exists(v.local_temp_path):
+                temp_dir = tempfile.mkdtemp(prefix="yt_jit_upload_")
+                logger.info(f"Just-In-Time: Downloading single video '{v.title}' ({v.source_video_id}) for upload...")
+                dl_result = await asyncio.to_thread(cls._download_video_and_metadata_sync, v.source_url, temp_dir)
+                active_filepath = dl_result.get("filepath")
+                full_info = dl_result.get("info") or {}
+
+                if not active_filepath or not os.path.exists(active_filepath):
+                    raise ValueError(f"Downloader did not produce video file for '{v.title}'.")
+
+                v.local_temp_path = active_filepath
+                v.title = full_info.get("title") or v.title
+                v.description = full_info.get("description") or v.description
+                v.tags = full_info.get("tags") or v.tags
+                v.category_id = str(full_info.get("categories", ["20"])[0]) if full_info.get("categories") else "20"
+                v.download_status = "DOWNLOADED"
+                await db.commit()
+            else:
+                active_filepath = v.local_temp_path
+
+            # 2. File Size Safety Guard
+            file_size_mb = os.path.getsize(active_filepath) / (1024 * 1024)
+            logger.info(f"Video '{v.title}' size: {file_size_mb:.2f} MB (Max allowed: {cfg.max_video_size_mb} MB)")
+            if cfg.max_video_size_mb and file_size_mb > cfg.max_video_size_mb:
+                raise ValueError(f"Video file size ({file_size_mb:.1f} MB) exceeds maximum allowed size ({cfg.max_video_size_mb} MB). Skipped.")
+
+            v.upload_status = "UPLOADING"
+            await db.commit()
+
+            # 3. Authenticate with target YouTube channel
             youtube = await YouTubeOAuthService.get_authenticated_service(target_channel.id, db)
 
-            # 2. Format title, description, and tags
+            # 4. Format title, description, and tags
             final_title = v.title
             if cfg.title_prefix:
                 final_title = f"{cfg.title_prefix.strip()} {final_title}"
@@ -411,7 +427,7 @@ class ChannelSyncService:
                 else:
                     break
 
-            # 3. Build metadata payload
+            # 5. Build metadata payload
             body = {
                 "snippet": {
                     "title": final_title,
@@ -426,7 +442,7 @@ class ChannelSyncService:
             }
 
             media_body = MediaFileUpload(
-                v.local_temp_path,
+                active_filepath,
                 mimetype="video/*",
                 chunksize=1024 * 1024 * 5,
                 resumable=True
@@ -460,14 +476,6 @@ class ChannelSyncService:
             await db.refresh(v)
 
             logger.info(f"Successfully uploaded synced video '{final_title}' -> https://youtu.be/{yt_video_id}")
-
-            # Clean up local file
-            try:
-                if v.local_temp_path and os.path.exists(v.local_temp_path):
-                    os.remove(v.local_temp_path)
-            except Exception:
-                pass
-
             return v
 
         except Exception as up_err:
@@ -476,3 +484,118 @@ class ChannelSyncService:
             v.error_message = str(up_err)
             await db.commit()
             raise up_err
+
+        finally:
+            # Clean up local temporary file immediately to ensure 0 disk waste
+            if active_filepath and os.path.exists(active_filepath):
+                try:
+                    os.remove(active_filepath)
+                    logger.info(f"Cleaned up temporary video file: {active_filepath}")
+                except Exception:
+                    pass
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    import shutil
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+            v.local_temp_path = None
+            await db.commit()
+
+    @classmethod
+    async def check_and_run_due_drip_uploads(cls):
+        """
+        Evaluates active source syncs in 'SCHEDULED' publish_mode.
+        Runs every minute via APScheduler.
+        If current local time matches one of the publish_time_slots, publishes the next queued video.
+        """
+        async with AsyncSessionLocal() as session:
+            try:
+                stmt = select(SourceChannelSync).where(
+                    SourceChannelSync.enabled == True,
+                    SourceChannelSync.publish_mode == "SCHEDULED"
+                )
+                res = await session.execute(stmt)
+                configs = res.scalars().all()
+
+                now_utc = datetime.now(timezone.utc)
+
+                for cfg in configs:
+                    tz_name = cfg.timezone or "UTC"
+                    try:
+                        tz = ZoneInfo(tz_name)
+                    except Exception:
+                        tz = timezone.utc
+
+                    local_now = now_utc.astimezone(tz)
+                    cur_time_str = f"{local_now.hour:02d}:{local_now.minute:02d}"
+                    slots = cfg.publish_time_slots or ["10:00", "15:00", "20:00"]
+
+                    # Prevent double execution within 3 minutes of last publish
+                    if cfg.last_scheduled_slot_published:
+                        last_diff = (now_utc - cfg.last_scheduled_slot_published).total_seconds()
+                        if last_diff < 180:
+                            continue
+
+                    if cur_time_str not in slots:
+                        continue
+
+                    # Find next pending video in queue
+                    v_stmt = select(SyncedSourceVideo).where(
+                        SyncedSourceVideo.sync_id == cfg.id,
+                        SyncedSourceVideo.upload_status == "PENDING"
+                    ).order_by(SyncedSourceVideo.created_at.asc())
+                    v_res = await session.execute(v_stmt)
+                    next_video = v_res.scalars().first()
+
+                    if next_video:
+                        logger.info(
+                            f"[Daily Drip Scheduler] Slot '{cur_time_str}' reached for sync '{cfg.id}'. "
+                            f"Publishing next queued video '{next_video.title}' (ID: {next_video.id})..."
+                        )
+                        cfg.last_scheduled_slot_published = now_utc
+                        await session.commit()
+
+                        try:
+                            await cls.upload_synced_video(session, next_video.id)
+                            logger.info(f"[Daily Drip Scheduler] Published video '{next_video.title}'.")
+                        except Exception as upload_err:
+                            logger.error(f"[Daily Drip Scheduler] Error uploading video: {upload_err}")
+                    else:
+                        logger.info(
+                            f"[Daily Drip Scheduler] Slot '{cur_time_str}' reached for sync '{cfg.id}', but queue is empty. "
+                            f"Attempting auto-sync to discover new videos..."
+                        )
+                        cfg.last_scheduled_slot_published = now_utc
+                        await session.commit()
+                        try:
+                            sync_resp = await cls.sync_channel(session, cfg.id, max_videos_to_download=3)
+                            if sync_resp.videos_downloaded > 0:
+                                v_res2 = await session.execute(v_stmt)
+                                new_video = v_res2.scalars().first()
+                                if new_video:
+                                    await cls.upload_synced_video(session, new_video.id)
+                        except Exception as sync_err:
+                            logger.warning(f"[Daily Drip Scheduler] Auto-sync attempt error: {sync_err}")
+
+            except Exception as e:
+                logger.error(f"Error in check_and_run_due_drip_uploads: {e}", exc_info=True)
+
+    @classmethod
+    async def auto_sync_all_active_channels(cls):
+        """
+        Periodic background job to automatically ingest new videos into the staged queue.
+        """
+        async with AsyncSessionLocal() as session:
+            try:
+                stmt = select(SourceChannelSync).where(SourceChannelSync.enabled == True)
+                res = await session.execute(stmt)
+                configs = res.scalars().all()
+                for cfg in configs:
+                    try:
+                        logger.info(f"[Auto-Ingest] Checking for new source videos: {cfg.source_channel_url}")
+                        await cls.sync_channel(session, cfg.id, max_videos_to_download=5)
+                    except Exception as err:
+                        logger.warning(f"[Auto-Ingest] Failed checking {cfg.source_channel_url}: {err}")
+            except Exception as e:
+                logger.error(f"Error in auto_sync_all_active_channels: {e}", exc_info=True)

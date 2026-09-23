@@ -54,13 +54,26 @@ export const ChannelSyncPage: React.FC = () => {
   const [sourceUrl, setSourceUrl] = useState<string>('');
   const [targetChannelId, setTargetChannelId] = useState<string>('');
   const [syncMode, setSyncMode] = useState<string>('ALL');
-  const [autoPublish, setAutoPublish] = useState<boolean>(false);
   const [privacyStatus, setPrivacyStatus] = useState<string>('public');
+  const [publishMode, setPublishMode] = useState<string>('SCHEDULED');
+  const [dailyPublishCount, setDailyPublishCount] = useState<number>(3);
+  const [publishTimeSlotsInput, setPublishTimeSlotsInput] = useState<string>('10:00, 15:00, 20:00');
+  const [timezone, setTimezone] = useState<string>(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  const [maxVideoSizeMb, setMaxVideoSizeMb] = useState<number>(300);
   const [titlePrefix, setTitlePrefix] = useState<string>('');
   const [titleSuffix, setTitleSuffix] = useState<string>('');
   const [descriptionFooter, setDescriptionFooter] = useState<string>('');
   const [customTagsInput, setCustomTagsInput] = useState<string>('');
   const [maxDownloadCount, setMaxDownloadCount] = useState<number>(5);
+
+  const updateDailySlotsPreset = (count: number) => {
+    setDailyPublishCount(count);
+    if (count === 1) setPublishTimeSlotsInput('12:00');
+    else if (count === 2) setPublishTimeSlotsInput('10:00, 18:00');
+    else if (count === 3) setPublishTimeSlotsInput('10:00, 15:00, 20:00');
+    else if (count === 4) setPublishTimeSlotsInput('09:00, 13:00, 17:00, 21:00');
+    else if (count === 5) setPublishTimeSlotsInput('08:00, 11:00, 14:00, 17:00, 20:00');
+  };
 
   const loadData = async () => {
     try {
@@ -92,8 +105,12 @@ export const ChannelSyncPage: React.FC = () => {
     setEditingConfig(null);
     setSourceUrl('');
     setSyncMode('ALL');
-    setAutoPublish(false);
     setPrivacyStatus('public');
+    setPublishMode('SCHEDULED');
+    setDailyPublishCount(3);
+    setPublishTimeSlotsInput('10:00, 15:00, 20:00');
+    setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    setMaxVideoSizeMb(300);
     setTitlePrefix('');
     setTitleSuffix('');
     setDescriptionFooter('Original creator: Voice Gaming. Full credit to original creator!');
@@ -107,8 +124,16 @@ export const ChannelSyncPage: React.FC = () => {
     setSourceUrl(cfg.source_channel_url);
     setTargetChannelId(cfg.target_channel_id);
     setSyncMode(cfg.sync_mode);
-    setAutoPublish(cfg.auto_publish);
     setPrivacyStatus(cfg.publish_privacy_status);
+    setPublishMode(cfg.publish_mode || (cfg.auto_publish ? 'IMMEDIATE' : 'SCHEDULED'));
+    setDailyPublishCount(cfg.daily_publish_count || 3);
+    setPublishTimeSlotsInput(
+      cfg.publish_time_slots && cfg.publish_time_slots.length > 0
+        ? cfg.publish_time_slots.join(', ')
+        : '10:00, 15:00, 20:00'
+    );
+    setTimezone(cfg.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    setMaxVideoSizeMb(cfg.max_video_size_mb || 300);
     setTitlePrefix(cfg.title_prefix || '');
     setTitleSuffix(cfg.title_suffix || '');
     setDescriptionFooter(cfg.description_footer || '');
@@ -124,12 +149,22 @@ export const ChannelSyncPage: React.FC = () => {
         .map((t) => t.trim())
         .filter((t) => t.length > 0);
 
+      const timeSlots = publishTimeSlotsInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
       const payload: SourceChannelSyncInput = {
         source_channel_url: sourceUrl,
         target_channel_id: targetChannelId,
         sync_mode: syncMode,
-        auto_publish: autoPublish,
+        auto_publish: publishMode === 'IMMEDIATE',
         publish_privacy_status: privacyStatus,
+        publish_mode: publishMode,
+        daily_publish_count: dailyPublishCount,
+        publish_time_slots: timeSlots.length > 0 ? timeSlots : ['10:00', '15:00', '20:00'],
+        timezone: timezone || 'UTC',
+        max_video_size_mb: Number(maxVideoSizeMb) || 300,
         title_prefix: titlePrefix || undefined,
         title_suffix: titleSuffix || undefined,
         description_footer: descriptionFooter || undefined,
@@ -337,9 +372,17 @@ export const ChannelSyncPage: React.FC = () => {
                         <div>
                           <h3 className="font-bold text-white text-sm flex items-center gap-2">
                             {cfg.source_channel_name || 'YouTube Source Channel'}
-                            {cfg.auto_publish && (
+                            {cfg.publish_mode === 'SCHEDULED' ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-500/15 text-blue-300 border border-blue-500/30 flex items-center gap-1">
+                                📅 {cfg.daily_publish_count || 3}/day ({cfg.publish_time_slots?.join(', ') || '10:00, 15:00, 20:00'})
+                              </span>
+                            ) : (cfg.publish_mode === 'IMMEDIATE' || cfg.auto_publish) ? (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                                Auto-Publish
+                                ⚡ Immediate
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                ✋ Manual
                               </span>
                             )}
                           </h3>
@@ -683,21 +726,138 @@ export const ChannelSyncPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-bold text-white block">Auto-Publish Immediately</span>
-                    <span className="text-[11px] text-slate-400">
-                      When new videos are detected, upload them directly to your channel without waiting.
-                    </span>
+              {/* Publishing & Drip Strategy */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-4">
+                <div>
+                  <label className="block font-bold text-white mb-2">Publishing Strategy</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPublishMode('SCHEDULED')}
+                      className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                        publishMode === 'SCHEDULED'
+                          ? 'bg-blue-600/15 border-blue-500 text-white shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="font-bold text-xs flex items-center gap-1.5">
+                        <span>📅</span> Daily Drip
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                        Publish 1–5 videos/day spaced across specific time slots.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPublishMode('IMMEDIATE')}
+                      className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                        publishMode === 'IMMEDIATE'
+                          ? 'bg-emerald-600/15 border-emerald-500 text-white shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="font-bold text-xs flex items-center gap-1.5">
+                        <span>⚡</span> Immediate
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                        Upload immediately as soon as a new video is discovered.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPublishMode('MANUAL')}
+                      className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                        publishMode === 'MANUAL'
+                          ? 'bg-amber-600/15 border-amber-500 text-white shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="font-bold text-xs flex items-center gap-1.5">
+                        <span>✋</span> Manual
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                        Stage metadata in library; you click upload manually.
+                      </p>
+                    </button>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={autoPublish}
-                    onChange={(e) => setAutoPublish(e.target.checked)}
-                    className="w-5 h-5 accent-red-600 rounded cursor-pointer"
-                  />
                 </div>
+
+                {publishMode === 'SCHEDULED' && (
+                  <div className="space-y-3 pt-2 border-t border-slate-800/80">
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="font-medium text-slate-300">Videos Per Day</label>
+                        <span className="text-blue-400 font-bold font-mono text-xs">{dailyPublishCount} / day</span>
+                      </div>
+                      <div className="flex gap-2">
+                        {[1, 2, 3, 4, 5].map((count) => (
+                          <button
+                            key={count}
+                            type="button"
+                            onClick={() => updateDailySlotsPreset(count)}
+                            className={`flex-1 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                              dailyPublishCount === count
+                                ? 'bg-blue-600 border-blue-500 text-white'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {count}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block font-medium text-slate-300 mb-1">
+                        Daily Time Slots (24h format, comma-separated)
+                      </label>
+                      <input
+                        type="text"
+                        value={publishTimeSlotsInput}
+                        onChange={(e) => setPublishTimeSlotsInput(e.target.value)}
+                        placeholder="e.g. 10:00, 15:00, 20:00"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-blue-500"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Videos will automatically publish at these exact times every day.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-medium text-slate-300 mb-1">Schedule Timezone</label>
+                        <input
+                          type="text"
+                          value={timezone}
+                          onChange={(e) => setTimezone(e.target.value)}
+                          placeholder="e.g. Asia/Kolkata or UTC"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-medium text-slate-300 mb-1">Max Video Size Guard (MB)</label>
+                        <input
+                          type="number"
+                          value={maxVideoSizeMb}
+                          onChange={(e) => setMaxVideoSizeMb(Number(e.target.value))}
+                          placeholder="300"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Storage Safety Callout */}
+                    <div className="p-3 bg-emerald-950/25 border border-emerald-500/20 rounded-xl text-emerald-300 text-[11px] flex items-start gap-2">
+                      <span className="text-sm">🛡️</span>
+                      <div>
+                        <strong>Storage-Safe Just-In-Time Pipeline:</strong> Videos are not stored in advance on your server. When a daily time slot arrives, the background worker downloads 1 video, uploads it to YouTube, and deletes the temporary file immediately.
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label className="block font-medium text-slate-400 mb-1">Publish Privacy Status</label>

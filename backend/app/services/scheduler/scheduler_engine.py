@@ -44,6 +44,32 @@ class SchedulerEngine:
             logger.info("SchedulerEngine: AsyncIOScheduler started.")
             await cls.sync_all_active_schedules()
 
+        # Register Channel Sync Daily Drip Job (checks every minute)
+        if not sched.get_job("channel_sync_daily_drip_job"):
+            from app.services.channel_sync.channel_sync_service import ChannelSyncService
+            sched.add_job(
+                ChannelSyncService.check_and_run_due_drip_uploads,
+                trigger="interval",
+                minutes=1,
+                id="channel_sync_daily_drip_job",
+                replace_existing=True,
+                coalesce=True
+            )
+            logger.info("SchedulerEngine: Registered 'channel_sync_daily_drip_job' (runs every minute).")
+
+        # Register Channel Sync Auto-Ingest Job (runs every 6 hours)
+        if not sched.get_job("channel_sync_auto_ingest_job"):
+            from app.services.channel_sync.channel_sync_service import ChannelSyncService
+            sched.add_job(
+                ChannelSyncService.auto_sync_all_active_channels,
+                trigger="interval",
+                hours=6,
+                id="channel_sync_auto_ingest_job",
+                replace_existing=True,
+                coalesce=True
+            )
+            logger.info("SchedulerEngine: Registered 'channel_sync_auto_ingest_job' (runs every 6 hours).")
+
     @classmethod
     async def shutdown(cls):
         sched = get_scheduler()

@@ -10,6 +10,12 @@ export interface SourceChannelSync {
   sync_mode: string; // ALL, SHORTS_ONLY, FULL_VIDEOS_ONLY
   auto_publish: boolean;
   publish_privacy_status: string; // public, unlisted, private
+  publish_mode: string; // SCHEDULED, IMMEDIATE, MANUAL
+  daily_publish_count: number;
+  publish_time_slots: string[];
+  timezone: string;
+  max_video_size_mb: number;
+  last_scheduled_slot_published?: string;
   title_prefix?: string;
   title_suffix?: string;
   description_footer?: string;
@@ -29,6 +35,11 @@ export interface SourceChannelSyncInput {
   sync_mode?: string;
   auto_publish?: boolean;
   publish_privacy_status?: string;
+  publish_mode?: string;
+  daily_publish_count?: number;
+  publish_time_slots?: string[];
+  timezone?: string;
+  max_video_size_mb?: number;
   title_prefix?: string;
   title_suffix?: string;
   description_footer?: string;

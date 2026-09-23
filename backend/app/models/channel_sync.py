@@ -17,6 +17,14 @@ class SourceChannelSync(Base, TimestampMixin):
     auto_publish = Column(Boolean, default=False, nullable=False)
     publish_privacy_status = Column(String(20), default="public", nullable=False) # public, unlisted, private
     
+    # Scheduling & Drip Configuration
+    publish_mode = Column(String(50), default="SCHEDULED", nullable=False) # SCHEDULED, IMMEDIATE, MANUAL
+    daily_publish_count = Column(Integer, default=3, nullable=False)
+    publish_time_slots = Column(JSON, default=lambda: ["10:00", "15:00", "20:00"], nullable=False)
+    timezone = Column(String(50), default="UTC", nullable=False)
+    max_video_size_mb = Column(Integer, default=300, nullable=False)
+    last_scheduled_slot_published = Column(DateTime(timezone=True), nullable=True)
+
     # Metadata customization overrides
     title_prefix = Column(String(255), nullable=True)
     title_suffix = Column(String(255), nullable=True)

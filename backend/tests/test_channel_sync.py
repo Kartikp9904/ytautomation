@@ -128,3 +128,33 @@ async def test_channel_sync_api_endpoints(client: AsyncClient, test_db_session: 
     # 4. DELETE /api/v1/channel-sync/{id}
     del_res = await client.delete(f"/api/v1/channel-sync/{sync_id}")
     assert del_res.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_daily_drip_scheduler_configuration(client: AsyncClient, test_db_session: AsyncSession):
+    # 1. Create target channel
+    channel = Channel(name="Drip Target Channel", timezone="Asia/Kolkata")
+    test_db_session.add(channel)
+    await test_db_session.commit()
+    await test_db_session.refresh(channel)
+
+    # 2. POST /api/v1/channel-sync with 3-per-day drip schedule
+    res = await client.post("/api/v1/channel-sync", json={
+        "source_channel_url": "https://www.youtube.com/@VoiceGaming",
+        "target_channel_id": channel.id,
+        "sync_mode": "SHORTS_ONLY",
+        "publish_mode": "SCHEDULED",
+        "daily_publish_count": 3,
+        "publish_time_slots": ["10:00", "15:00", "20:00"],
+        "timezone": "Asia/Kolkata",
+        "max_video_size_mb": 250,
+        "publish_privacy_status": "public"
+    })
+    assert res.status_code == 201
+    data = res.json()
+    assert data["publish_mode"] == "SCHEDULED"
+    assert data["daily_publish_count"] == 3
+    assert data["publish_time_slots"] == ["10:00", "15:00", "20:00"]
+    assert data["timezone"] == "Asia/Kolkata"
+    assert data["max_video_size_mb"] == 250
+

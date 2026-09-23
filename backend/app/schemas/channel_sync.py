@@ -9,6 +9,14 @@ class SourceChannelSyncBase(BaseModel):
     sync_mode: str = "ALL" # ALL, SHORTS_ONLY, FULL_VIDEOS_ONLY
     auto_publish: bool = False
     publish_privacy_status: str = "public" # public, unlisted, private
+    
+    # Scheduling & Drip Configuration
+    publish_mode: str = "SCHEDULED" # SCHEDULED, IMMEDIATE, MANUAL
+    daily_publish_count: int = 3
+    publish_time_slots: List[str] = ["10:00", "15:00", "20:00"]
+    timezone: str = "UTC"
+    max_video_size_mb: int = 300
+
     title_prefix: Optional[str] = None
     title_suffix: Optional[str] = None
     description_footer: Optional[str] = None
@@ -26,6 +34,11 @@ class SourceChannelSyncUpdate(BaseModel):
     sync_mode: Optional[str] = None
     auto_publish: Optional[bool] = None
     publish_privacy_status: Optional[str] = None
+    publish_mode: Optional[str] = None
+    daily_publish_count: Optional[int] = None
+    publish_time_slots: Optional[List[str]] = None
+    timezone: Optional[str] = None
+    max_video_size_mb: Optional[int] = None
     title_prefix: Optional[str] = None
     title_suffix: Optional[str] = None
     description_footer: Optional[str] = None
@@ -67,6 +80,7 @@ class SourceChannelSyncResponse(SourceChannelSyncBase):
     target_channel_name: Optional[str] = None
     videos_synced_count: Optional[int] = 0
     videos_uploaded_count: Optional[int] = 0
+    last_scheduled_slot_published: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
