@@ -35,21 +35,35 @@ class ChannelSyncService:
         res = await db.execute(stmt)
         configs = res.scalars().all()
 
+        if not configs:
+            return []
+
+        # Fetch channel names in one query to avoid async lazy loading
+        ch_stmt = select(Channel.id, Channel.name)
+        ch_res = await db.execute(ch_stmt)
+        channel_names = {row[0]: row[1] for row in ch_res.all()}
+
+        # Fetch video counts
+        total_counts = {}
+        uploaded_counts = {}
+
+        v_stmt = select(SyncedSourceVideo.sync_id, func.count(SyncedSourceVideo.id)).group_by(SyncedSourceVideo.sync_id)
+        v_res = await db.execute(v_stmt)
+        for sync_id, count in v_res.all():
+            total_counts[sync_id] = count
+
+        up_stmt = select(SyncedSourceVideo.sync_id, func.count(SyncedSourceVideo.id)).where(
+            SyncedSourceVideo.upload_status == "UPLOADED"
+        ).group_by(SyncedSourceVideo.sync_id)
+        up_res = await db.execute(up_stmt)
+        for sync_id, count in up_res.all():
+            uploaded_counts[sync_id] = count
+
         responses = []
         for cfg in configs:
-            # Count videos
-            v_stmt = select(func.count(SyncedSourceVideo.id)).where(SyncedSourceVideo.sync_id == cfg.id)
-            v_res = await db.execute(v_stmt)
-            total_videos = v_res.scalar() or 0
-
-            up_stmt = select(func.count(SyncedSourceVideo.id)).where(
-                SyncedSourceVideo.sync_id == cfg.id,
-                SyncedSourceVideo.upload_status == "UPLOADED"
-            )
-            up_res = await db.execute(up_stmt)
-            uploaded_videos = up_res.scalar() or 0
-
-            target_ch_name = cfg.target_channel.name if cfg.target_channel else None
+            total_videos = total_counts.get(cfg.id, 0)
+            uploaded_videos = uploaded_counts.get(cfg.id, 0)
+            target_ch_name = channel_names.get(cfg.target_channel_id)
 
             responses.append(SourceChannelSyncResponse(
                 id=cfg.id,

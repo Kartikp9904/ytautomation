@@ -28,8 +28,8 @@ class SourceChannelSync(Base, TimestampMixin):
     last_error = Column(Text, nullable=True)
 
     # Relationships
-    target_channel = relationship("Channel", backref="source_sync_configs")
-    synced_videos = relationship("SyncedSourceVideo", back_populates="sync_config", cascade="all, delete-orphan")
+    target_channel = relationship("Channel", backref="source_sync_configs", lazy="selectin")
+    synced_videos = relationship("SyncedSourceVideo", back_populates="sync_config", cascade="all, delete-orphan", lazy="selectin")
 
 
 class SyncedSourceVideo(Base, TimestampMixin):

@@ -20,7 +20,8 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.TEMP_STORAGE_PATH, exist_ok=True)
     os.makedirs(settings.LOCAL_STORAGE_BASE_PATH, exist_ok=True)
 
-    # Initialize Database Tables (for dev/SQLite)
+    # Initialize Database Tables
+    import app.models
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database schema initialized successfully.")
