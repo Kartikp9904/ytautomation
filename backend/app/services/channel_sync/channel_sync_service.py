@@ -337,14 +337,19 @@ class ChannelSyncService:
             raise RuntimeError("yt-dlp is not installed in the environment.")
 
         cookie_file = cls._get_cookiefile_option()
+        has_cookies = bool(cookie_file and os.path.exists(cookie_file) and os.path.getsize(cookie_file) > 0)
         node_available = bool(shutil.which('node'))
 
-        strategies = [
-            {"name": "android_web", "player_client": ["android", "web"], "use_cookie": True},
-            {"name": "default_web", "player_client": None, "use_cookie": True},
+        strategies = []
+        if has_cookies:
+            # When browser cookies are available, use standard web client first
+            strategies.append({"name": "authenticated_web", "player_client": None, "use_cookie": True})
+            strategies.append({"name": "authenticated_android_web", "player_client": ["android", "web"], "use_cookie": True})
+        strategies.extend([
+            {"name": "android_web_no_cookie", "player_client": ["android", "web"], "use_cookie": False},
             {"name": "android_only", "player_client": ["android"], "use_cookie": False},
-            {"name": "mweb", "player_client": ["mweb", "web"], "use_cookie": True},
-        ]
+            {"name": "default_web_no_cookie", "player_client": None, "use_cookie": False},
+        ])
 
         last_err = None
         for strat in strategies:
@@ -358,7 +363,7 @@ class ChannelSyncService:
             if node_available:
                 ydl_opts['js_runtimes'] = {'node': {}}
 
-            if strat.get("use_cookie") and cookie_file and os.path.exists(cookie_file):
+            if strat.get("use_cookie") and has_cookies and cookie_file:
                 ydl_opts['cookiefile'] = cookie_file
 
             if strat.get("player_client"):
@@ -369,7 +374,7 @@ class ChannelSyncService:
                 }
 
             try:
-                logger.info(f"Extracting channel metadata for '{channel_url}' using strategy '{strat['name']}'...")
+                logger.info(f"Extracting channel metadata for '{channel_url}' using strategy '{strat['name']}' (cookies: {bool(ydl_opts.get('cookiefile'))})...")
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(channel_url, download=False)
                     if info and (info.get("entries") or info.get("title")):
@@ -384,34 +389,49 @@ class ChannelSyncService:
 
     @classmethod
     def _download_video_and_metadata_sync(cls, video_url: str, output_dir: str) -> Dict[str, Any]:
-        """Downloads single video and extracts detailed metadata with multi-strategy fallbacks"""
+        """Downloads single video and extracts detailed metadata with multi-strategy fallbacks and ffmpeg remuxing"""
         if not yt_dlp:
             raise RuntimeError("yt-dlp is not installed in the environment.")
 
         out_template = os.path.join(output_dir, "%(id)s.%(ext)s")
         cookie_file = cls._get_cookiefile_option()
+        has_cookies = bool(cookie_file and os.path.exists(cookie_file) and os.path.getsize(cookie_file) > 0)
         node_available = bool(shutil.which('node'))
+        has_ffmpeg = bool(shutil.which('ffmpeg'))
 
-        strategies = [
-            {"name": "android_web", "player_client": ["android", "web"], "use_cookie": True},
-            {"name": "default_web", "player_client": None, "use_cookie": True},
+        strategies = []
+        if has_cookies:
+            # If user provided authenticated browser cookies, use standard web client first
+            strategies.append({"name": "authenticated_web", "player_client": None, "use_cookie": True})
+            strategies.append({"name": "authenticated_android_web", "player_client": ["android", "web"], "use_cookie": True})
+        strategies.extend([
+            {"name": "android_web_no_cookie", "player_client": ["android", "web"], "use_cookie": False},
             {"name": "android_only", "player_client": ["android"], "use_cookie": False},
-            {"name": "ios_web", "player_client": ["ios", "web"], "use_cookie": True},
-        ]
+            {"name": "default_web_no_cookie", "player_client": None, "use_cookie": False},
+        ])
 
         last_err = None
         for strat in strategies:
             ydl_opts: Dict[str, Any] = {
-                'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+                'format': 'bv*+ba/b',
                 'outtmpl': out_template,
                 'quiet': True,
                 'no_warnings': True,
                 'writethumbnail': True,
             }
+            if has_ffmpeg:
+                ydl_opts['merge_output_format'] = 'mp4'
+                ydl_opts['postprocessors'] = [
+                    {
+                        'key': 'FFmpegVideoConvertor',
+                        'preferedformat': 'mp4',
+                    }
+                ]
+
             if node_available:
                 ydl_opts['js_runtimes'] = {'node': {}}
 
-            if strat.get("use_cookie") and cookie_file and os.path.exists(cookie_file):
+            if strat.get("use_cookie") and has_cookies and cookie_file:
                 ydl_opts['cookiefile'] = cookie_file
 
             if strat.get("player_client"):
@@ -422,7 +442,7 @@ class ChannelSyncService:
                 }
 
             try:
-                logger.info(f"Downloading video '{video_url}' with strategy '{strat['name']}'...")
+                logger.info(f"Downloading video '{video_url}' with strategy '{strat['name']}' (cookies: {bool(ydl_opts.get('cookiefile'))})...")
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(video_url, download=True)
                     if not info:
@@ -437,11 +457,12 @@ class ChannelSyncService:
                         found_path = expected_filepath
                     else:
                         for f in os.listdir(output_dir):
-                            if video_id and f.startswith(video_id) and not f.endswith(('.jpg', '.png', '.webp', '.part')):
+                            if video_id and f.startswith(video_id) and not f.endswith(('.jpg', '.png', '.webp', '.part', '.mhtml', '.json', '.temp')):
                                 found_path = os.path.join(output_dir, f)
                                 break
 
                     if found_path and os.path.exists(found_path):
+                        logger.info(f"Successfully downloaded video '{video_url}' via strategy '{strat['name']}' -> {found_path}")
                         return {
                             "info": info,
                             "filepath": found_path
