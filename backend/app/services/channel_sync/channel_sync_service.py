@@ -203,6 +203,29 @@ class ChannelSyncService:
         return [SyncedSourceVideoResponse.model_validate(v) for v in videos]
 
     @classmethod
+    def _get_cookiefile_option(cls) -> Optional[str]:
+        """Resolves optional cookies file from environment or local path"""
+        custom_path = os.environ.get("YOUTUBE_COOKIES_FILE")
+        if custom_path and os.path.exists(custom_path):
+            return custom_path
+
+        for name in ["cookies.txt", "youtube_cookies.txt"]:
+            if os.path.exists(name):
+                return os.path.abspath(name)
+
+        raw_cookies = os.environ.get("YOUTUBE_COOKIES")
+        if raw_cookies and raw_cookies.strip():
+            temp_cookie_path = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
+            try:
+                with open(temp_cookie_path, "w", encoding="utf-8") as f:
+                    f.write(raw_cookies.strip())
+                return temp_cookie_path
+            except Exception:
+                pass
+
+        return None
+
+    @classmethod
     def _extract_channel_metadata_sync(cls, channel_url: str, limit: int = 15) -> Dict[str, Any]:
         """Runs yt-dlp to inspect source channel and list recent videos"""
         if not yt_dlp:
@@ -214,7 +237,15 @@ class ChannelSyncService:
             'quiet': True,
             'no_warnings': True,
             'ignoreerrors': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios']
+                }
+            }
         }
+        cookie_file = cls._get_cookiefile_option()
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(channel_url, download=False)
@@ -228,12 +259,20 @@ class ChannelSyncService:
 
         out_template = os.path.join(output_dir, "%(id)s.%(ext)s")
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
             'outtmpl': out_template,
             'quiet': True,
             'no_warnings': True,
             'writethumbnail': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios']
+                }
+            }
         }
+        cookie_file = cls._get_cookiefile_option()
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
