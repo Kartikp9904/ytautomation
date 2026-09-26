@@ -67,4 +67,4 @@ class SyncedSourceVideo(Base, TimestampMixin):
     error_message = Column(Text, nullable=True)
 
     # Relationships
-    sync_config = relationship("SourceChannelSync", back_populates="synced_videos")
+    sync_config = relationship("SourceChannelSync", back_populates="synced_videos", lazy="selectin")

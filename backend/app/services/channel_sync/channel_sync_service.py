@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
+from sqlalchemy.orm import selectinload
 from googleapiclient.http import MediaFileUpload
 
 from app.core.database import AsyncSessionLocal
@@ -31,6 +32,30 @@ except ImportError:
 
 
 class ChannelSyncService:
+    @classmethod
+    def normalize_channel_url(cls, raw_url: str, sync_mode: str = "ALL") -> str:
+        """
+        Normalizes handles/URLs and ensures correct tab target (/shorts vs /videos).
+        """
+        clean = raw_url.strip().rstrip("/")
+        if clean.startswith("@"):
+            clean = f"https://www.youtube.com/{clean}"
+        elif "youtube.com" not in clean and not clean.startswith("http"):
+            if clean.startswith("UC"):
+                clean = f"https://www.youtube.com/channel/{clean}"
+            else:
+                clean = f"https://www.youtube.com/@{clean.lstrip('@')}"
+
+        # Strip any subtab suffix (/videos, /shorts, /featured, /streams, /community)
+        base = re.sub(r'/(videos|shorts|featured|streams|community)/?$', '', clean)
+
+        if sync_mode == "SHORTS_ONLY":
+            return f"{base}/shorts"
+        elif sync_mode == "FULL_VIDEOS_ONLY":
+            return f"{base}/videos"
+        else:
+            return base
+
     @classmethod
     async def list_sync_configs(cls, db: AsyncSession) -> List[SourceChannelSyncResponse]:
         stmt = select(SourceChannelSync).order_by(SourceChannelSync.created_at.desc())
@@ -112,12 +137,8 @@ class ChannelSyncService:
         if not ch_res.scalars().first():
             raise ValueError(f"Target channel with ID '{data.target_channel_id}' not found.")
 
-        # Clean URL/handle
-        clean_url = data.source_channel_url.strip()
-        if clean_url.startswith("@"):
-            clean_url = f"https://www.youtube.com/{clean_url}/videos"
-        elif "youtube.com" in clean_url and not any(clean_url.endswith(x) for x in ["/videos", "/shorts"]):
-            clean_url = f"{clean_url.rstrip('/')}/videos"
+        # Clean & normalize URL according to sync mode
+        clean_url = cls.normalize_channel_url(data.source_channel_url, data.sync_mode)
 
         cfg = SourceChannelSync(
             source_channel_url=clean_url,
@@ -148,6 +169,12 @@ class ChannelSyncService:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
+        if "source_channel_url" in update_data:
+            target_mode = update_data.get("sync_mode", cfg.sync_mode)
+            update_data["source_channel_url"] = cls.normalize_channel_url(update_data["source_channel_url"], target_mode)
+        elif "sync_mode" in update_data:
+            update_data["source_channel_url"] = cls.normalize_channel_url(cfg.source_channel_url, update_data["sync_mode"])
+
         for field, val in update_data.items():
             setattr(cfg, field, val)
 
@@ -238,52 +265,88 @@ class ChannelSyncService:
     ) -> SyncTriggerResponse:
         """
         Executes full sync pipeline:
-        1. Queries source channel using yt-dlp
-        2. Filters out existing/duplicate videos
-        3. Downloads newest videos
-        4. If auto_publish is on, uploads to target YouTube channel
+        1. Formulates target URLs based on sync_mode (/shorts vs /videos vs both)
+        2. Queries source channel using yt-dlp flat extraction
+        3. Filters out existing/duplicate videos
+        4. Ingests video metadata records into SyncedSourceVideo (STAGED)
+        5. If publish_mode is IMMEDIATE or auto_publish is True, immediately uploads
         """
         cfg = await cls.get_sync_config(db, sync_id)
         if not cfg:
             raise ValueError(f"Sync configuration with ID '{sync_id}' not found.")
 
-        logger.info(f"Starting channel sync for '{cfg.source_channel_url}' -> target channel ID {cfg.target_channel_id}...")
+        logger.info(f"Starting channel sync for '{cfg.source_channel_url}' (mode: {cfg.sync_mode}) -> target channel ID {cfg.target_channel_id}...")
 
-        temp_dir = tempfile.mkdtemp(prefix="yt_sync_")
         videos_found = 0
         videos_downloaded = 0
         videos_uploaded = 0
 
         try:
-            # 1. Extract channel listing
-            channel_info = await asyncio.to_thread(cls._extract_channel_metadata_sync, cfg.source_channel_url, 15)
-            entries = channel_info.get("entries") or []
-            cfg.source_channel_name = channel_info.get("uploader") or channel_info.get("channel") or cfg.source_channel_name
-            cfg.source_channel_id = channel_info.get("channel_id") or cfg.source_channel_id
+            # Clean and isolate base channel URL
+            clean_url = cfg.source_channel_url.strip().rstrip('/')
+            base_url = re.sub(r'/(videos|shorts|featured|streams|community)/?$', '', clean_url)
+
+            # Determine tab targets to scan based on sync_mode
+            scan_targets = []
+            if cfg.sync_mode == "SHORTS_ONLY":
+                scan_targets.append((f"{base_url}/shorts", True))
+            elif cfg.sync_mode == "FULL_VIDEOS_ONLY":
+                scan_targets.append((f"{base_url}/videos", False))
+            else: # "ALL"
+                # Scan both tabs so both Shorts and Full Videos are discovered
+                scan_targets.append((f"{base_url}/shorts", True))
+                scan_targets.append((f"{base_url}/videos", False))
+
+            entries_to_process = []
+            for scan_url, is_shorts_tab in scan_targets:
+                try:
+                    c_info = await asyncio.to_thread(cls._extract_channel_metadata_sync, scan_url, 15)
+                    uploader = c_info.get("uploader") or c_info.get("channel")
+                    if uploader and not cfg.source_channel_name:
+                        cfg.source_channel_name = uploader
+                    ch_id = c_info.get("channel_id")
+                    if ch_id and not cfg.source_channel_id:
+                        cfg.source_channel_id = ch_id
+
+                    tab_entries = c_info.get("entries") or []
+                    for e in tab_entries:
+                        if e and e.get("id"):
+                            entries_to_process.append((e, is_shorts_tab))
+                except Exception as ext_err:
+                    logger.warning(f"Error querying source tab {scan_url}: {ext_err}")
+
             cfg.last_synced_at = datetime.now(timezone.utc)
             cfg.last_error = None
             await db.commit()
 
-            videos_found = len(entries)
-            logger.info(f"Source channel '{cfg.source_channel_name}' returned {videos_found} videos.")
+            videos_found = len(entries_to_process)
+            logger.info(f"Source channel '{cfg.source_channel_name}' returned {videos_found} candidates across scanned tabs.")
 
-            for entry in entries:
-                if not entry:
-                    continue
+            for entry, is_shorts_tab in entries_to_process:
                 v_id = entry.get("id")
                 if not v_id:
                     continue
 
                 # Check duplicate
-                dup_stmt = select(SyncedSourceVideo).where(SyncedSourceVideo.source_video_id == v_id)
+                dup_stmt = select(SyncedSourceVideo).where(
+                    SyncedSourceVideo.sync_id == cfg.id,
+                    SyncedSourceVideo.source_video_id == v_id
+                )
                 dup_res = await db.execute(dup_stmt)
                 if dup_res.scalars().first():
                     continue # Already processed, skip
 
-                v_url = entry.get("url") or f"https://www.youtube.com/watch?v={v_id}"
                 v_title = entry.get("title") or "Untitled Video"
                 v_duration = entry.get("duration") or 0
-                is_short = bool(v_duration and v_duration <= 65) or ("/shorts/" in v_url)
+
+                if is_shorts_tab:
+                    is_short = True
+                    v_url = entry.get("url") or f"https://www.youtube.com/shorts/{v_id}"
+                    if "shorts" not in v_url and "watch" not in v_url:
+                        v_url = f"https://www.youtube.com/shorts/{v_id}"
+                else:
+                    v_url = entry.get("url") or f"https://www.youtube.com/watch?v={v_id}"
+                    is_short = bool(v_duration and v_duration <= 65) or ("/shorts/" in (entry.get("url") or ""))
 
                 # Check mode filter
                 if cfg.sync_mode == "SHORTS_ONLY" and not is_short:
@@ -295,6 +358,13 @@ class ChannelSyncService:
                 if videos_downloaded >= max_videos_to_download:
                     break
 
+                # Resolve thumbnail with fallback
+                thumb = entry.get("thumbnail")
+                if isinstance(thumb, list) and len(thumb) > 0:
+                    thumb = thumb[-1].get("url")
+                if not thumb or not isinstance(thumb, str):
+                    thumb = f"https://i.ytimg.com/vi/{v_id}/hqdefault.jpg"
+
                 # Create record - STAGED (Metadata only stored in DB! Zero video file bytes on disk)
                 synced_video = SyncedSourceVideo(
                     sync_id=cfg.id,
@@ -303,8 +373,8 @@ class ChannelSyncService:
                     title=v_title,
                     description=entry.get("description") or "",
                     tags=entry.get("tags") or [],
-                    thumbnail_url=entry.get("thumbnail"),
-                    duration_seconds=v_duration,
+                    thumbnail_url=thumb,
+                    duration_seconds=v_duration if v_duration else None,
                     is_short=is_short,
                     download_status="STAGED",
                     upload_status="PENDING"
@@ -325,7 +395,7 @@ class ChannelSyncService:
 
             return SyncTriggerResponse(
                 success=True,
-                message=f"Sync completed. Ingested {videos_downloaded} new video(s). {videos_uploaded} published immediately, remainder queued for scheduled publishing.",
+                message=f"Sync completed. Staged {videos_downloaded} new video(s). {videos_uploaded} published immediately, {max(0, videos_downloaded - videos_uploaded)} queued for scheduled publishing.",
                 videos_found=videos_found,
                 videos_downloaded=videos_downloaded,
                 videos_uploaded=videos_uploaded
@@ -350,7 +420,9 @@ class ChannelSyncService:
         Downloads ONLY this single video, checks file size limit, uploads to YouTube,
         and GUARANTEES immediate deletion from disk upon completion or failure.
         """
-        stmt = select(SyncedSourceVideo).where(SyncedSourceVideo.id == synced_video_id)
+        stmt = select(SyncedSourceVideo).options(
+            selectinload(SyncedSourceVideo.sync_config).selectinload(SourceChannelSync.target_channel)
+        ).where(SyncedSourceVideo.id == synced_video_id)
         res = await db.execute(stmt)
         v = res.scalars().first()
         if not v:

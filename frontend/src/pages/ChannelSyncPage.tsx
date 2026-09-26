@@ -599,6 +599,10 @@ export const ChannelSyncPage: React.FC = () => {
                             <span className="text-emerald-400 font-bold flex items-center gap-1">
                               <CheckCircle2 className="w-3.5 h-3.5" /> Ready
                             </span>
+                          ) : v.download_status === 'STAGED' ? (
+                            <span className="text-purple-400 font-medium flex items-center gap-1">
+                              <Sparkles className="w-3.5 h-3.5" /> Staged (Queue)
+                            </span>
                           ) : v.download_status === 'DOWNLOADING' ? (
                             <span className="text-cyan-400 flex items-center gap-1">
                               <RefreshCw className="w-3.5 h-3.5 animate-spin" /> In Progress
