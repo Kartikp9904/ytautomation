@@ -36,6 +36,13 @@ async def lifespan(app: FastAPI):
     except Exception as recon_err:
         logger.warning(f"Could not complete startup crash reconciliation: {recon_err}")
 
+    # Restore YouTube cookies from database if available
+    try:
+        from app.services.channel_sync.channel_sync_service import ChannelSyncService
+        await ChannelSyncService.restore_cookies_from_db()
+    except Exception as cookie_err:
+        logger.warning(f"Could not restore cookies from database: {cookie_err}")
+
     yield
 
     logger.info("Shutting down application...")

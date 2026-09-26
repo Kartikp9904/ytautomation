@@ -2,6 +2,7 @@ import os
 import tempfile
 import asyncio
 import re
+import shutil
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Any, Tuple
@@ -13,6 +14,7 @@ from googleapiclient.http import MediaFileUpload
 from app.core.database import AsyncSessionLocal
 from app.models.channel_sync import SourceChannelSync, SyncedSourceVideo
 from app.models.channel import Channel
+from app.models.setting import SystemSetting
 from app.schemas.channel_sync import (
     SourceChannelSyncCreate,
     SourceChannelSyncUpdate,
@@ -203,14 +205,26 @@ class ChannelSyncService:
         return [SyncedSourceVideoResponse.model_validate(v) for v in videos]
 
     @classmethod
+    def _write_cookies_to_disk(cls, cookies_text: str) -> str:
+        os.makedirs(settings.TEMP_STORAGE_PATH, exist_ok=True)
+        target_path = os.path.join(settings.TEMP_STORAGE_PATH, "cookies.txt")
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(cookies_text.strip())
+        return target_path
+
+    @classmethod
     def _get_cookiefile_option(cls) -> Optional[str]:
-        """Resolves optional cookies file from environment or local path"""
+        """Resolves optional cookies file from environment, temp_storage, or local path"""
         custom_path = os.environ.get("YOUTUBE_COOKIES_FILE")
-        if custom_path and os.path.exists(custom_path):
+        if custom_path and os.path.exists(custom_path) and os.path.getsize(custom_path) > 0:
             return custom_path
 
-        for name in ["cookies.txt", "youtube_cookies.txt"]:
-            if os.path.exists(name):
+        temp_storage_cookie = os.path.join(settings.TEMP_STORAGE_PATH, "cookies.txt")
+        if os.path.exists(temp_storage_cookie) and os.path.getsize(temp_storage_cookie) > 0:
+            return os.path.abspath(temp_storage_cookie)
+
+        for name in ["cookies.txt", "youtube_cookies.txt", os.path.join("temp_storage", "cookies.txt")]:
+            if os.path.exists(name) and os.path.getsize(name) > 0:
                 return os.path.abspath(name)
 
         raw_cookies = os.environ.get("YOUTUBE_COOKIES")
@@ -226,74 +240,219 @@ class ChannelSyncService:
         return None
 
     @classmethod
+    async def get_cookies_status(cls, db: AsyncSession) -> Dict[str, Any]:
+        """Checks if YouTube cookies are available and active"""
+        file_path = cls._get_cookiefile_option()
+        if file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+            return {
+                "has_cookies": True,
+                "source": "file",
+                "file_path": os.path.basename(file_path),
+                "size_bytes": os.path.getsize(file_path)
+            }
+
+        # Check DB
+        stmt = select(SystemSetting).where(SystemSetting.key == "youtube_cookies")
+        res = await db.execute(stmt)
+        setting = res.scalars().first()
+        if setting and setting.value and isinstance(setting.value, dict) and setting.value.get("cookies"):
+            cls._write_cookies_to_disk(setting.value["cookies"])
+            return {
+                "has_cookies": True,
+                "source": "database",
+                "updated_at": setting.value.get("updated_at")
+            }
+
+        return {
+            "has_cookies": False,
+            "source": None
+        }
+
+    @classmethod
+    async def save_cookies(cls, db: AsyncSession, cookies_text: str) -> Dict[str, Any]:
+        """Saves Netscape-format YouTube cookies into database and disk"""
+        clean_text = cookies_text.strip()
+        if not clean_text:
+            raise ValueError("Cookies text cannot be empty.")
+
+        cls._write_cookies_to_disk(clean_text)
+
+        stmt = select(SystemSetting).where(SystemSetting.key == "youtube_cookies")
+        res = await db.execute(stmt)
+        setting = res.scalars().first()
+
+        now_str = datetime.now(timezone.utc).isoformat()
+        if setting:
+            setting.value = {"cookies": clean_text, "updated_at": now_str}
+        else:
+            setting = SystemSetting(
+                key="youtube_cookies",
+                value={"cookies": clean_text, "updated_at": now_str},
+                description="YouTube cookies for yt-dlp authenticated extraction and downloads"
+            )
+            db.add(setting)
+
+        await db.commit()
+        logger.info("Successfully saved and synced YouTube cookies.")
+        return {"success": True, "message": "Cookies successfully saved and activated."}
+
+    @classmethod
+    async def delete_cookies(cls, db: AsyncSession) -> Dict[str, Any]:
+        """Deletes cookies from database and local storage"""
+        target_path = os.path.join(settings.TEMP_STORAGE_PATH, "cookies.txt")
+        if os.path.exists(target_path):
+            try:
+                os.remove(target_path)
+            except Exception:
+                pass
+
+        stmt = delete(SystemSetting).where(SystemSetting.key == "youtube_cookies")
+        await db.execute(stmt)
+        await db.commit()
+        logger.info("YouTube cookies removed from disk and database.")
+        return {"success": True, "message": "Cookies removed."}
+
+    @classmethod
+    async def restore_cookies_from_db(cls):
+        """Restores cookies from DB on startup if not present on disk"""
+        try:
+            target_path = os.path.join(settings.TEMP_STORAGE_PATH, "cookies.txt")
+            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                return
+
+            async with AsyncSessionLocal() as session:
+                stmt = select(SystemSetting).where(SystemSetting.key == "youtube_cookies")
+                res = await session.execute(stmt)
+                setting = res.scalars().first()
+                if setting and setting.value and isinstance(setting.value, dict) and setting.value.get("cookies"):
+                    cls._write_cookies_to_disk(setting.value["cookies"])
+                    logger.info("Restored YouTube cookies from database to local temp_storage.")
+        except Exception as e:
+            logger.warning(f"Could not restore cookies from database: {e}")
+
+    @classmethod
     def _extract_channel_metadata_sync(cls, channel_url: str, limit: int = 15) -> Dict[str, Any]:
-        """Runs yt-dlp to inspect source channel and list recent videos"""
+        """Runs yt-dlp to inspect source channel and list recent videos with fallback strategies"""
         if not yt_dlp:
             raise RuntimeError("yt-dlp is not installed in the environment.")
 
-        ydl_opts = {
-            'extract_flat': True,
-            'playlistend': limit,
-            'quiet': True,
-            'no_warnings': True,
-            'ignoreerrors': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'ios']
-                }
-            }
-        }
         cookie_file = cls._get_cookiefile_option()
-        if cookie_file:
-            ydl_opts['cookiefile'] = cookie_file
+        node_available = bool(shutil.which('node'))
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(channel_url, download=False)
-            return info or {}
+        strategies = [
+            {"name": "android_web", "player_client": ["android", "web"], "use_cookie": True},
+            {"name": "default_web", "player_client": None, "use_cookie": True},
+            {"name": "android_only", "player_client": ["android"], "use_cookie": False},
+            {"name": "mweb", "player_client": ["mweb", "web"], "use_cookie": True},
+        ]
+
+        last_err = None
+        for strat in strategies:
+            ydl_opts: Dict[str, Any] = {
+                'extract_flat': True,
+                'playlistend': limit,
+                'quiet': True,
+                'no_warnings': True,
+                'ignoreerrors': True,
+            }
+            if node_available:
+                ydl_opts['js_runtimes'] = {'node': {}}
+
+            if strat.get("use_cookie") and cookie_file and os.path.exists(cookie_file):
+                ydl_opts['cookiefile'] = cookie_file
+
+            if strat.get("player_client"):
+                ydl_opts['extractor_args'] = {
+                    'youtube': {
+                        'player_client': strat["player_client"]
+                    }
+                }
+
+            try:
+                logger.info(f"Extracting channel metadata for '{channel_url}' using strategy '{strat['name']}'...")
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(channel_url, download=False)
+                    if info and (info.get("entries") or info.get("title")):
+                        return info
+            except Exception as e:
+                logger.warning(f"Channel metadata strategy '{strat['name']}' failed for {channel_url}: {e}")
+                last_err = e
+
+        if last_err:
+            raise last_err
+        return {}
 
     @classmethod
     def _download_video_and_metadata_sync(cls, video_url: str, output_dir: str) -> Dict[str, Any]:
-        """Downloads the single video and extracts detailed metadata (tags, description, full resolution)"""
+        """Downloads single video and extracts detailed metadata with multi-strategy fallbacks"""
         if not yt_dlp:
             raise RuntimeError("yt-dlp is not installed in the environment.")
 
         out_template = os.path.join(output_dir, "%(id)s.%(ext)s")
-        ydl_opts = {
-            'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
-            'outtmpl': out_template,
-            'quiet': True,
-            'no_warnings': True,
-            'writethumbnail': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'ios']
-                }
-            }
-        }
         cookie_file = cls._get_cookiefile_option()
-        if cookie_file:
-            ydl_opts['cookiefile'] = cookie_file
+        node_available = bool(shutil.which('node'))
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=True)
-            video_id = info.get("id")
-            ext = info.get("ext", "mp4")
-            expected_filepath = os.path.join(output_dir, f"{video_id}.{ext}")
-            
-            # Find matching downloaded video file
-            found_path = None
-            if os.path.exists(expected_filepath):
-                found_path = expected_filepath
-            else:
-                for f in os.listdir(output_dir):
-                    if f.startswith(video_id) and not f.endswith(('.jpg', '.png', '.webp', '.part')):
-                        found_path = os.path.join(output_dir, f)
-                        break
+        strategies = [
+            {"name": "android_web", "player_client": ["android", "web"], "use_cookie": True},
+            {"name": "default_web", "player_client": None, "use_cookie": True},
+            {"name": "android_only", "player_client": ["android"], "use_cookie": False},
+            {"name": "ios_web", "player_client": ["ios", "web"], "use_cookie": True},
+        ]
 
-            return {
-                "info": info,
-                "filepath": found_path
+        last_err = None
+        for strat in strategies:
+            ydl_opts: Dict[str, Any] = {
+                'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+                'outtmpl': out_template,
+                'quiet': True,
+                'no_warnings': True,
+                'writethumbnail': True,
             }
+            if node_available:
+                ydl_opts['js_runtimes'] = {'node': {}}
+
+            if strat.get("use_cookie") and cookie_file and os.path.exists(cookie_file):
+                ydl_opts['cookiefile'] = cookie_file
+
+            if strat.get("player_client"):
+                ydl_opts['extractor_args'] = {
+                    'youtube': {
+                        'player_client': strat["player_client"]
+                    }
+                }
+
+            try:
+                logger.info(f"Downloading video '{video_url}' with strategy '{strat['name']}'...")
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=True)
+                    if not info:
+                        continue
+
+                    video_id = info.get("id")
+                    ext = info.get("ext", "mp4")
+                    expected_filepath = os.path.join(output_dir, f"{video_id}.{ext}")
+
+                    found_path = None
+                    if os.path.exists(expected_filepath):
+                        found_path = expected_filepath
+                    else:
+                        for f in os.listdir(output_dir):
+                            if video_id and f.startswith(video_id) and not f.endswith(('.jpg', '.png', '.webp', '.part')):
+                                found_path = os.path.join(output_dir, f)
+                                break
+
+                    if found_path and os.path.exists(found_path):
+                        return {
+                            "info": info,
+                            "filepath": found_path
+                        }
+            except Exception as e:
+                logger.warning(f"Download strategy '{strat['name']}' failed for {video_url}: {e}")
+                last_err = e
+
+        if last_err:
+            raise last_err
+        raise RuntimeError(f"All download strategies failed for {video_url}.")
 
     @classmethod
     async def sync_channel(

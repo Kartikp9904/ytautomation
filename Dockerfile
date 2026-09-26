@@ -16,11 +16,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install runtime and curl
+# Install runtime, curl, ffmpeg, and nodejs for yt-dlp JavaScript challenge solver
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
     ffmpeg \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies

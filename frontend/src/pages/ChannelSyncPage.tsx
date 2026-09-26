@@ -7,7 +7,11 @@ import {
   deleteSyncConfig, 
   triggerChannelSync, 
   getSyncedVideos,
-  uploadSingleSyncedVideo 
+  uploadSingleSyncedVideo,
+  getCookiesStatus,
+  saveCookies,
+  deleteCookies,
+  type CookieStatusResponse
 } from '../api/channelSync';
 import type { Channel } from '../api/channels';
 import { getChannels } from '../api/channels';
@@ -27,7 +31,9 @@ import {
   Layers, 
   Tv, 
   X,
-  Sliders
+  Sliders,
+  Key,
+  ShieldCheck
 } from 'lucide-react';
 
 const Youtube: React.FC<{ className?: string }> = ({ className = "w-5 h-5" }) => (
@@ -49,6 +55,12 @@ export const ChannelSyncPage: React.FC = () => {
   const [editingConfig, setEditingConfig] = useState<SourceChannelSync | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // YouTube Cookies State
+  const [cookieStatus, setCookieStatus] = useState<CookieStatusResponse | null>(null);
+  const [isCookieModalOpen, setIsCookieModalOpen] = useState<boolean>(false);
+  const [cookieInput, setCookieInput] = useState<string>('');
+  const [savingCookies, setSavingCookies] = useState<boolean>(false);
 
   // Modal Form State
   const [sourceUrl, setSourceUrl] = useState<string>('');
@@ -79,14 +91,16 @@ export const ChannelSyncPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const [configsData, channelsData, videosData] = await Promise.all([
+      const [configsData, channelsData, videosData, cookiesData] = await Promise.all([
         getSyncConfigs(),
         getChannels(),
         getSyncedVideos(selectedSyncId || undefined),
+        getCookiesStatus().catch(() => ({ has_cookies: false })),
       ]);
       setConfigs(configsData);
       setChannels(channelsData.items);
       setSyncedVideos(videosData);
+      setCookieStatus(cookiesData);
       if (channelsData.items.length > 0 && !targetChannelId) {
         setTargetChannelId(channelsData.items[0].id);
       }
@@ -248,6 +262,21 @@ export const ChannelSyncPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsCookieModalOpen(true)}
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+              cookieStatus?.has_cookies
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+            }`}
+            title="Configure YouTube Cookies for Cloud Extraction"
+          >
+            <Key className="w-4 h-4" />
+            <span>YouTube Cookies</span>
+            {cookieStatus?.has_cookies && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            )}
+          </button>
           <button
             onClick={loadData}
             disabled={loading}
@@ -944,6 +973,126 @@ export const ChannelSyncPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* YouTube Cookies Modal */}
+      {isCookieModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">YouTube Cloud Cookies</h3>
+                  <p className="text-xs text-slate-400">Authenticate yt-dlp to bypass bot checks & datacenter blocks on Render</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsCookieModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto">
+              <div className={`p-4 rounded-xl border flex items-start gap-3 ${
+                cookieStatus?.has_cookies
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                  : 'bg-slate-800/40 border-slate-700/60 text-slate-300'
+              }`}>
+                <ShieldCheck className={`w-5 h-5 mt-0.5 shrink-0 ${cookieStatus?.has_cookies ? 'text-emerald-400' : 'text-slate-400'}`} />
+                <div className="text-xs space-y-1">
+                  <div className="font-semibold text-white">
+                    Status: {cookieStatus?.has_cookies ? 'Active (Authenticated)' : 'No Custom Cookies Loaded'}
+                  </div>
+                  <p className="text-slate-400">
+                    {cookieStatus?.has_cookies
+                      ? `Loaded via ${cookieStatus.source}. The multi-client fallback strategy is armed with cloud authorization.`
+                      : 'The system uses an Android + Node.js client fallback. Adding exported cookies from a logged-in browser provides 100% bypass assurance.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                  <span>Netscape cookies.txt Content</span>
+                  <span className="text-[11px] text-slate-500">Paste from browser extension</span>
+                </label>
+                <textarea
+                  value={cookieInput}
+                  onChange={(e) => setCookieInput(e.target.value)}
+                  placeholder={`# Netscape HTTP Cookie File\n# https://curl.se/docs/http-cookies.html\n.youtube.com\tTRUE\t/\tTRUE\t1790000000\tSID\t...`}
+                  rows={8}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 font-mono focus:border-red-500 focus:outline-none transition resize-none"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Tip: Use a Chrome/Brave extension like <strong>"Get cookies.txt LOCALLY"</strong> while on YouTube.com, export the file or copy its content, and paste it above.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-slate-800 bg-slate-900/60 flex items-center justify-between">
+              {cookieStatus?.has_cookies ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      setSavingCookies(true);
+                      await deleteCookies();
+                      setCookieInput('');
+                      setCookieStatus({ has_cookies: false });
+                      setSuccessMsg('Cookies cleared.');
+                    } catch (err: any) {
+                      setError(err.message || 'Failed to clear cookies.');
+                    } finally {
+                      setSavingCookies(false);
+                    }
+                  }}
+                  disabled={savingCookies}
+                  className="px-3.5 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/20 rounded-xl transition cursor-pointer"
+                >
+                  Clear Cookies
+                </button>
+              ) : <div />}
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsCookieModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!cookieInput.trim()) return;
+                    try {
+                      setSavingCookies(true);
+                      const res = await saveCookies(cookieInput);
+                      const updated = await getCookiesStatus();
+                      setCookieStatus(updated);
+                      setSuccessMsg(res.message || 'Cookies saved successfully.');
+                      setIsCookieModalOpen(false);
+                      setCookieInput('');
+                    } catch (err: any) {
+                      setError(err.response?.data?.detail || err.message || 'Failed to save cookies.');
+                    } finally {
+                      setSavingCookies(false);
+                    }
+                  }}
+                  disabled={savingCookies || !cookieInput.trim()}
+                  className="px-5 py-2 text-xs font-bold text-white bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-50 rounded-xl transition shadow-lg shadow-red-900/20 cursor-pointer"
+                >
+                  {savingCookies ? 'Saving...' : 'Save & Activate'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

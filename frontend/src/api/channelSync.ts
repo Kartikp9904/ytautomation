@@ -110,3 +110,27 @@ export const uploadSingleSyncedVideo = async (videoId: string): Promise<SyncedSo
   const response = await apiClient.post<SyncedSourceVideo>(`/channel-sync/videos/${videoId}/upload`);
   return response.data;
 };
+
+export interface CookieStatusResponse {
+  has_cookies: boolean;
+  source?: string;
+  file_path?: string;
+  updated_at?: string;
+  size_bytes?: number;
+}
+
+export const getCookiesStatus = async (): Promise<CookieStatusResponse> => {
+  const response = await apiClient.get<CookieStatusResponse>('/channel-sync/cookies/status');
+  return response.data;
+};
+
+export const saveCookies = async (cookies: string): Promise<{ success: boolean; message: string }> => {
+  const response = await apiClient.post<{ success: boolean; message: string }>('/channel-sync/cookies', { cookies });
+  return response.data;
+};
+
+export const deleteCookies = async (): Promise<{ success: boolean; message: string }> => {
+  const response = await apiClient.delete<{ success: boolean; message: string }>('/channel-sync/cookies');
+  return response.data;
+};
+

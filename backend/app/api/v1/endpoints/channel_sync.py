@@ -1,5 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.schemas.channel_sync import (
@@ -98,3 +99,31 @@ async def upload_single_synced_video(
         return SyncedSourceVideoResponse.model_validate(v)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+class CookieInput(BaseModel):
+    cookies: str
+
+
+@router.get("/cookies/status")
+async def get_cookies_status(db: AsyncSession = Depends(get_db)):
+    """Check whether YouTube cookies are loaded and active"""
+    return await ChannelSyncService.get_cookies_status(db)
+
+
+@router.post("/cookies")
+async def save_youtube_cookies(payload: CookieInput, db: AsyncSession = Depends(get_db)):
+    """Upload/paste YouTube cookies in Netscape format for cloud authentication"""
+    try:
+        return await ChannelSyncService.save_cookies(db, payload.cookies)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.delete("/cookies")
+async def delete_youtube_cookies(db: AsyncSession = Depends(get_db)):
+    """Delete saved YouTube cookies"""
+    return await ChannelSyncService.delete_cookies(db)
+
