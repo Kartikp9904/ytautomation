@@ -42,4 +42,4 @@ WORKDIR /app/backend
 EXPOSE 10000
 
 # Start Alembic migrations and Uvicorn bound to Render's dynamic PORT
-CMD sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"
+CMD sh -c "alembic upgrade head || true && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"
